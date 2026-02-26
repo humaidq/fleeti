@@ -8,11 +8,14 @@
     }:
     let
       inherit (pkgs) callPackage;
+      docsPackage = callPackage ../docs { };
     in
     {
       packages = {
         default = callPackage ../src { };
         fleeti = callPackage ../src { };
+        docs = docsPackage;
+        doc = docsPackage;
       };
     };
 }
