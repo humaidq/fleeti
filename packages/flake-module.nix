@@ -14,6 +14,7 @@
       packages = {
         default = callPackage ../src { };
         fleeti = callPackage ../src { };
+        fleeti-docs = docsPackage;
         docs = docsPackage;
         doc = docsPackage;
       };

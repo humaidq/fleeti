@@ -2,4 +2,5 @@
 # SPDX-License-Identifier: Apache-2.0
 final: _prev: {
   fleeti = final.callPackage ../src { };
+  fleeti-docs = final.callPackage ../docs { };
 }
