@@ -1,0 +1,58 @@
+---
+import config from 'virtual:starlight/user-config';
+import { Icon } from '@astrojs/starlight/components';
+
+const links = config.social || [];
+---
+
+{
+	links.length > 0 && (
+		<>
+			{links.map(({ label, href, icon }) => (
+				<a {href} rel="me" class="icon-link sl-flex">
+					<span class="sr-only">{label}</span>
+					<Icon name={icon} />
+				</a>
+			))}
+		</>
+	)
+}
+
+<a href="https://admin.fleeti.ae" class="login-link">Log In</a>
+
+<style>
+	@layer starlight.core {
+		.icon-link {
+			color: var(--sl-color-text-accent);
+			padding: 0.5em;
+			margin: -0.5em;
+		}
+
+		.icon-link:hover {
+			opacity: 0.66;
+		}
+
+		.login-link {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			height: 2rem;
+			padding-inline: 0.75rem;
+			border-radius: 999px;
+			border: 1px solid var(--sl-color-text-accent);
+			background: transparent;
+			color: var(--sl-color-text-accent);
+			font-size: var(--sl-text-sm);
+			font-weight: 600;
+			line-height: 1;
+			text-decoration: none;
+			transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+		}
+
+		.login-link:hover {
+			background: var(--sl-color-text-accent);
+			border-color: var(--sl-color-text-accent);
+			color: var(--sl-color-black);
+		}
+	}
+</style>

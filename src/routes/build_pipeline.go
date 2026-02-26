@@ -474,7 +474,7 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	}
 
 	updateBasePath := "/update/" + fleetID + "/"
-	updateSourcePath := "http://10.10.0.14:8080" + updateBasePath
+	updateSourcePath := "https://admin.fleeti.ae" + updateBasePath
 
 	packageLines := ""
 	if len(packageExpressions) > 0 {

@@ -13,7 +13,7 @@
     transfers =
       let
         commonSource = {
-          Path = "http://10.10.0.14:8080/update/";
+          Path = "https://admin.fleeti.ae/update/";
           Type = "url-file";
         };
 
