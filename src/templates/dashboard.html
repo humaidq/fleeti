@@ -1,0 +1,171 @@
+{{ template "head" . }}
+
+<div class="welcome-container">
+  <h2>Fleet Control Plane</h2>
+  <p class="welcome-subtitle">
+    {{ if .UserDisplayName }}Welcome {{ .UserDisplayName }}!{{ else }}Welcome!{{ end }}
+    <a href="/logout" data-dashboard-logout-link>Log out?</a>
+    <br />
+    Manage profiles, builds, devices, and rollouts.
+  </p>
+  <form method="POST" action="/logout" class="hidden" data-dashboard-logout-form></form>
+
+  <section class="section-card dashboard-quickstart">
+    <h3>Guided Deployment</h3>
+    <p>Use the deployment wizard to move from fleet selection to rollout in one guided chain.</p>
+    <a href="/deployments/wizard" class="btn">Open Deployment Wizard</a>
+  </section>
+
+  <div class="list-card-list welcome-service-list">
+    <div class="list-card">
+      <a href="/fleets" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-layer-group"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Fleets</div>
+            <div class="list-card-entry-description">Group and describe managed device fleets.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/profiles" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-id-card"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Profiles</div>
+            <div class="list-card-entry-description">Define image configuration profiles and flake refs.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/builds" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-hammer"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Builds</div>
+            <div class="list-card-entry-description">Track build versions and artifact locations.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/releases" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-tag"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Releases</div>
+            <div class="list-card-entry-description">Publish build versions to rollout channels.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/devices" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-microchip"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Devices</div>
+            <div class="list-card-entry-description">Track inventory, update state, and attestation level.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/rollouts" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Rollouts</div>
+            <div class="list-card-entry-description">Plan staged release deployments across fleets.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="list-card">
+      <a href="/security" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading"><span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-shield-halved"></i></span></span>
+          <div class="list-card-entry-body">
+            <div class="list-card-entry-title">Account &amp; Administration</div>
+            <div class="list-card-entry-description">Manage passkeys, account access, and invite administration.</div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <h3 class="welcome-stats-title">Stats</h3>
+  {{ $counts := .Counts }}
+  <div class="stats-compact">
+    <div class="stat-item">
+      <span class="stat-item-label">Fleets</span>
+      <span class="stat-item-value">{{ $counts.Fleets }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Profiles</span>
+      <span class="stat-item-value">{{ $counts.Profiles }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Builds</span>
+      <span class="stat-item-value">{{ $counts.Builds }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Releases</span>
+      <span class="stat-item-value">{{ $counts.Releases }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Devices</span>
+      <span class="stat-item-value">{{ $counts.Devices }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Healthy Devices</span>
+      <span class="stat-item-value">{{ $counts.HealthyDevices }}</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-item-label">Rollouts</span>
+      <span class="stat-item-value">{{ $counts.Rollouts }}</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function() {
+    var logoutLink = document.querySelector("[data-dashboard-logout-link]");
+    var logoutForm = document.querySelector("[data-dashboard-logout-form]");
+
+    if (!logoutLink || !logoutForm) {
+      return;
+    }
+
+    var tokenMeta = document.querySelector('meta[name="csrf-token"]');
+    var csrfToken = tokenMeta ? tokenMeta.getAttribute("content") : "";
+    if (csrfToken) {
+      var csrfInput = document.createElement("input");
+      csrfInput.type = "hidden";
+      csrfInput.name = "_csrf";
+      csrfInput.value = csrfToken;
+      logoutForm.appendChild(csrfInput);
+    }
+
+    logoutLink.addEventListener("click", function(event) {
+      event.preventDefault();
+      if (typeof logoutForm.requestSubmit === "function") {
+        logoutForm.requestSubmit();
+
+        return;
+      }
+
+      logoutForm.submit();
+    });
+  })();
+</script>
+
+{{ template "foot" . }}

@@ -1,0 +1,102 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Summary</h2>
+  <div class="page-header-actions">
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  <p class="muted-text">Created (UTC): {{ .Profile.CreatedAt }}</p>
+  {{ if .Profile.Description }}
+  <p>{{ .Profile.Description }}</p>
+  {{ else }}
+  <p class="muted-text">No description provided.</p>
+  {{ end }}
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Configuration Overview</h3>
+  <div class="list-card-list">
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Settings</div>
+          <div class="muted-text">Name, description, and assigned fleets</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/edit" class="btn">Open Settings</a>
+      </div>
+    </div>
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Packages</div>
+          <div class="muted-text">{{ .PackageCount }} package{{ if ne .PackageCount 1 }}s{{ end }} configured</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/packages" class="btn">Open Packages</a>
+      </div>
+    </div>
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Kernel</div>
+          <div class="muted-text">{{ .KernelSummary }}</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/kernel" class="btn">Open Kernel</a>
+      </div>
+    </div>
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Raw Nix</div>
+          <div class="muted-text">{{ if .HasRawNix }}Custom raw nix is set{{ else }}No raw nix override{{ end }}</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="btn">Open Raw Nix</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{{ if .Packages }}
+<section class="section-card">
+  <h3>Selected Packages</h3>
+  <div class="table-card">
+    <table class="contacts-list responsive-stack-table">
+      <thead>
+        <tr>
+          <th>Package</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .Packages }}
+        <tr>
+          <td data-label="Package"><code>{{ . }}</code></td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+</section>
+{{ end }}
+
+{{ template "foot" . }}

@@ -1,0 +1,145 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Packages</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Search Packages</h3>
+  <form method="get" action="/profiles/{{ .Profile.ID }}/packages" class="form-grid">
+    <div class="form-group">
+      <label for="profile-package-search">Search Packages</label>
+      <input id="profile-package-search" name="q" class="form-item" value="{{ .PackageSearchQuery }}" placeholder="wayland" />
+      <small class="muted-text">Uses <code>nix-search --channel=unstable --json &lt;term&gt;</code>.</small>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Search</button>
+      {{ if .PackageSearchQuery }}
+      <a href="/profiles/{{ .Profile.ID }}/packages" class="btn">Clear</a>
+      {{ end }}
+    </div>
+  </form>
+
+  {{ if .PackageSearchError }}
+  <p class="search-results-error">{{ .PackageSearchError }}</p>
+  {{ end }}
+
+  {{ if .PackageSearchQuery }}
+  <p class="muted-text">
+    Results for <code>{{ .PackageSearchQuery }}</code>
+    {{ if .PackageSearchTotal }}
+    - {{ .PackageSearchTotal }} found{{ if .PackageSearchTruncated }}, showing first {{ len .PackageSearchResults }}{{ end }}
+    {{ end }}
+  </p>
+  {{ if .PackageSearchResults }}
+  <div class="table-card">
+    <table class="contacts-list package-search-table responsive-stack-table">
+      <thead>
+        <tr>
+          <th>Attribute</th>
+          <th>Version</th>
+          <th>Details</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .PackageSearchResults }}
+        <tr>
+          <td data-label="Attribute">
+            <code>{{ .AttrName }}</code>
+            {{ if .PackageName }}<div class="muted-text">{{ .PackageName }}</div>{{ end }}
+            {{ if .AttrSet }}<div class="muted-text">Set: {{ .AttrSet }}</div>{{ end }}
+          </td>
+          <td data-label="Version">{{ if .Version }}<code>{{ .Version }}</code>{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+          <td data-label="Details">
+            {{ if .Description }}<div>{{ .Description }}</div>{{ else }}<div class="muted-text">No description provided.</div>{{ end }}
+            {{ if .Homepage }}<div class="muted-text"><a href="{{ .Homepage }}" target="_blank" rel="noopener noreferrer">{{ .Homepage }}</a></div>{{ end }}
+            {{ if .Programs }}<div class="muted-text">Programs: <code>{{ .Programs }}</code></div>{{ end }}
+            {{ if .License }}<div class="muted-text">License: {{ .License }}</div>{{ end }}
+            {{ if .Position }}<div class="muted-text"><code>{{ .Position }}</code></div>{{ end }}
+          </td>
+          <td data-label="Actions" class="package-search-actions">
+            {{ if .AlreadyAdded }}
+            <span class="badge">Added</span>
+            {{ else if .Addable }}
+            <form method="post" action="/profiles/{{ $.Profile.ID }}/packages" class="inline-form">
+              <input type="hidden" name="package" value="{{ .AttrName }}" />
+              <input type="hidden" name="q" value="{{ $.PackageSearchQuery }}" />
+              <button type="submit" class="btn package-add-btn" aria-label="Add {{ .AttrName }}">+</button>
+            </form>
+            {{ else }}
+            <span class="muted-text">{{ .AddError }}</span>
+            {{ end }}
+          </td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  {{ if .PackageSearchError }}{{ else }}
+  <p class="muted-text">No packages found for this search.</p>
+  {{ end }}
+  {{ end }}
+  {{ end }}
+</section>
+
+<section class="section-card">
+  <h3>Selected Packages</h3>
+  {{ if .Packages }}
+  <div class="table-card">
+    <table class="contacts-list responsive-stack-table">
+      <thead>
+        <tr>
+          <th>Package</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .Packages }}
+        <tr>
+          <td data-label="Package"><code>{{ . }}</code></td>
+          <td data-label="Actions">
+            <form method="post" action="/profiles/{{ $.Profile.ID }}/packages/remove" class="inline-form">
+              <input type="hidden" name="package" value="{{ . }}" />
+              <input type="hidden" name="q" value="{{ $.PackageSearchQuery }}" />
+              <button type="submit" class="btn">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="muted-text">No packages added yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

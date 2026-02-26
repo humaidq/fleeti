@@ -1,0 +1,146 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  <h2>Build Log</h2>
+  <div class="page-header-actions">
+    <a href="/builds/{{ .Build.ID }}" class="btn">Back to Build</a>
+  </div>
+</div>
+
+<section id="build-log-viewer" class="section-card" data-build-id="{{ .Build.ID }}" data-initial-status="{{ .Build.Status }}">
+  <div class="build-log-meta">
+    <div class="build-log-meta-item">
+      <span class="muted-text">Build ID</span>
+      <code>{{ .Build.ID }}</code>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Version</span>
+      <strong>{{ .Build.Version }}</strong>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Profile</span>
+      <span>{{ .Build.ProfileName }} (r{{ .Build.ProfileRevision }})</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Created (UTC)</span>
+      <span>{{ .Build.CreatedAt }}</span>
+    </div>
+  </div>
+
+  <div class="build-log-status-row">
+    <span class="muted-text">Status</span>
+    <span id="build-log-status" class="status-badge status-{{ .Build.Status }}">{{ .Build.Status }}</span>
+  </div>
+
+  <p id="build-log-hint" class="muted-text">Loading build log history...</p>
+  <pre id="build-log-output" class="build-log-output" aria-live="polite"></pre>
+  <p id="build-log-error" class="build-log-error"></p>
+</section>
+
+<script>
+  (() => {
+    const viewerEl = document.getElementById("build-log-viewer");
+    const outputEl = document.getElementById("build-log-output");
+    const statusEl = document.getElementById("build-log-status");
+    const hintEl = document.getElementById("build-log-hint");
+    const errorEl = document.getElementById("build-log-error");
+
+    if (!viewerEl || !outputEl || !statusEl || !hintEl || !errorEl) {
+      return;
+    }
+
+    const buildID = viewerEl.dataset.buildId || "";
+    const initialStatus = viewerEl.dataset.initialStatus || "";
+
+    if (buildID.length === 0) {
+      errorEl.textContent = "Unable to start live log stream: missing build id.";
+
+      return;
+    }
+
+    let after = 0;
+    let stopped = false;
+
+    function isTerminalStatus(status) {
+      return status === "succeeded" || status === "failed";
+    }
+
+    function updateStatus(status) {
+      if (typeof status !== "string" || status.length === 0) {
+        return;
+      }
+
+      statusEl.textContent = status;
+      statusEl.className = "status-badge status-" + status;
+    }
+
+    function appendChunk(chunk) {
+      if (typeof chunk !== "string" || chunk.length === 0) {
+        return;
+      }
+
+      const stickToBottom = outputEl.scrollTop + outputEl.clientHeight >= outputEl.scrollHeight - 32;
+      outputEl.append(document.createTextNode(chunk));
+
+      if (stickToBottom) {
+        outputEl.scrollTop = outputEl.scrollHeight;
+      }
+    }
+
+    async function poll() {
+      if (stopped) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/builds/${encodeURIComponent(buildID)}/logs/live?after=${encodeURIComponent(after)}`, {
+          cache: "no-store",
+          headers: {
+            Accept: "application/json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`request failed with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        errorEl.textContent = "";
+
+        appendChunk(payload.chunk);
+
+        if (typeof payload.next_after === "number" && payload.next_after >= after) {
+          after = payload.next_after;
+        }
+
+        updateStatus(payload.status);
+
+        if (payload.done === true) {
+          hintEl.textContent = "Build finished. Showing persisted log history.";
+          stopped = true;
+
+          return;
+        }
+
+        hintEl.textContent = isTerminalStatus(payload.status)
+          ? "Build finished. Showing persisted log history."
+          : "Streaming output live from stored build logs...";
+
+        const hasChunk = typeof payload.chunk === "string" && payload.chunk.length > 0;
+        setTimeout(poll, hasChunk ? 150 : 1000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown error";
+        errorEl.textContent = `Live log unavailable: ${message}. Retrying...`;
+        setTimeout(poll, 2000);
+      }
+    }
+
+    updateStatus(initialStatus);
+    hintEl.textContent = isTerminalStatus(initialStatus)
+      ? "Loading persisted log history..."
+      : "Connecting to live build output...";
+    poll();
+  })();
+</script>
+
+{{ template "foot" . }}

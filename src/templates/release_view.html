@@ -1,0 +1,127 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Release Summary</h2>
+  <div class="page-header-actions">
+    <a href="/rollouts" class="btn">View Rollouts</a>
+    <a href="/releases" class="btn">Back to Releases</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Release.Version }}</h3>
+  <div class="build-log-meta">
+    <div class="build-log-meta-item">
+      <span class="muted-text">Release ID</span>
+      <code>{{ .Release.ID }}</code>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Channel</span>
+      <span class="badge">{{ .Release.Channel }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Status</span>
+      <span class="status-badge status-{{ .Release.Status }}">{{ if eq .Release.Status "withdrawn" }}taken down{{ else }}{{ .Release.Status }}{{ end }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Fleet</span>
+      <span>{{ if .Release.FleetName }}{{ .Release.FleetName }}{{ else }}-{{ end }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Build</span>
+      <span>{{ .Release.Build }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Profile</span>
+      <span>{{ .Release.ProfileName }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Published (UTC)</span>
+      <span>{{ .Release.PublishedAt }}</span>
+    </div>
+  </div>
+
+  {{ if .Release.Notes }}
+  <div class="build-log-status-row">
+    <span class="muted-text">Notes</span>
+    <span>{{ .Release.Notes }}</span>
+  </div>
+  {{ end }}
+</section>
+
+<section class="section-card">
+  <h3>Navigation</h3>
+  <div class="list-card-list">
+    <div class="list-card">
+      <a href="/builds/{{ .Release.BuildID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-hammer"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">View Source Build</div>
+            <div class="list-card-meta"><span class="muted-text">Open the build used to publish this release.</span></div>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="list-card">
+      <a href="/rollouts" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">Browse Rollouts</div>
+            <div class="list-card-meta"><span class="muted-text">See where this release is being deployed.</span></div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="section-card">
+  <h3>Related Rollouts</h3>
+  {{ if .RelatedRollouts }}
+  <div class="list-card-list">
+    {{ range .RelatedRollouts }}
+    <div class="list-card rollout-list-card">
+      <a href="/rollouts/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .FleetName }}</div>
+            <div class="list-card-meta rollout-list-meta">
+              <span class="muted-text">Rollout: <code>{{ .ID }}</code></span>
+              <span class="muted-text">Status: <span class="status-badge status-{{ .Status }}">{{ .Status }}</span></span>
+              <span class="muted-text">Release status: <span class="status-badge status-{{ .ReleaseStatus }}">{{ if eq .ReleaseStatus "withdrawn" }}taken down{{ else }}{{ .ReleaseStatus }}{{ end }}</span></span>
+              <span class="muted-text">Started (UTC): {{ if .StartedAt }}{{ .StartedAt }}{{ else }}-{{ end }}</span>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No rollouts reference this release yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

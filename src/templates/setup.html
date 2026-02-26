@@ -1,0 +1,58 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  {{ if .IsInviteSetup }}
+  <h2>Account Setup</h2>
+  {{ else }}
+  <h2>Admin Setup</h2>
+  {{ end }}
+</div>
+
+{{ if .Error }}
+<div class="alert alert-red">
+  <h5 class="alert-title">Error</h5>
+  <p>{{ .Error }}</p>
+</div>
+{{ end }}
+
+<div class="alert alert-red hidden" data-webauthn-error>
+  <h5 class="alert-title">Error</h5>
+  <p data-webauthn-error-message></p>
+</div>
+
+{{ if .BootstrapReady }}
+  {{ if .IsInviteSetup }}
+  <p>Create your account using a passkey. This setup link works once and expires after 24 hours.</p>
+  {{ else }}
+  <p>Create the first admin account using a passkey. This account will be able to add more passkeys later.</p>
+  {{ end }}
+
+  <div class="form-group">
+    <label for="setup-display-name" class="item-title">Display name</label>
+    <input type="text" id="setup-display-name" class="form-item" required value="{{ .DisplayName }}" />
+  </div>
+
+  <div class="form-group">
+    <label for="setup-passkey-label" class="item-title">Passkey label (optional)</label>
+    <input type="text" id="setup-passkey-label" class="form-item" placeholder="MacBook Pro, iPhone" />
+  </div>
+
+  <div class="form-group">
+    <button
+      type="button"
+      class="btn"
+      data-webauthn-register
+      data-start-url="/webauthn/setup/start"
+      data-finish-url="/webauthn/setup/finish"
+      data-redirect-url="/"
+      data-display-name-input="#setup-display-name"
+      data-passkey-label-input="#setup-passkey-label"
+    >Create passkey</button>
+  </div>
+
+  <p class="muted-text">You can add additional passkeys later from the Security page.</p>
+{{ end }}
+
+<script src="/webauthn.js" defer></script>
+
+{{ template "foot" . }}

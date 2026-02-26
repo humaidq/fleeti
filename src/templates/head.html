@@ -1,0 +1,64 @@
+{{ define "head" }}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#134dae" />
+    <meta name="csrf-token" content="{{ .csrf_token }}" />
+    <link rel="stylesheet" href="/main.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css" integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <title>{{ if .PageTitle }}{{ .PageTitle }} - Fleeti{{ else }}Fleeti{{ end }}</title>
+  </head>
+  <body>
+    <header class="groundwave-header">
+      <div class="header-container">
+        <a href="/" class="header-logo">Fleeti</a>
+        {{ if not .HeaderOnly }}
+        <button class="nav-hamburger" aria-label="Toggle navigation menu" onclick="this.classList.toggle('active');document.querySelector('.nav-menu').classList.toggle('active')">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        {{ end }}
+      </div>
+      {{ if not .HeaderOnly }}
+      <nav class="navbar">
+        <div class="nav-menu">
+          <a href="/"{{ if .IsDashboard }} class="nav-active"{{ end }}>Dashboard</a>
+          <a href="/fleets"{{ if .IsFleets }} class="nav-active"{{ end }}>Fleets</a>
+          <a href="/profiles"{{ if .IsProfiles }} class="nav-active"{{ end }}>Profiles</a>
+          <a href="/builds"{{ if .IsBuilds }} class="nav-active"{{ end }}>Builds</a>
+          <a href="/releases"{{ if .IsReleases }} class="nav-active"{{ end }}>Releases</a>
+          <a href="/devices"{{ if .IsDevices }} class="nav-active"{{ end }}>Devices</a>
+          <a href="/rollouts"{{ if .IsRollouts }} class="nav-active"{{ end }}>Rollouts</a>
+        </div>
+      </nav>
+      {{ end }}
+    </header>
+    <main>
+      {{ if .Flash }}
+        {{ $flash := .Flash }}
+        {{ if eq $flash.Type "error" }}
+          <div class="alert alert-red">
+            <h5 class="alert-title">Error</h5>
+            <p>{{ $flash.Message }}</p>
+          </div>
+        {{ else if eq $flash.Type "success" }}
+          <div class="alert alert-green">
+            <h5 class="alert-title">Success</h5>
+            <p>{{ $flash.Message }}</p>
+          </div>
+        {{ else if eq $flash.Type "warning" }}
+          <div class="alert alert-yellow">
+            <h5 class="alert-title">Warning</h5>
+            <p>{{ $flash.Message }}</p>
+          </div>
+        {{ else if eq $flash.Type "info" }}
+          <div class="alert alert-grey">
+            <h5 class="alert-title">Info</h5>
+            <p>{{ $flash.Message }}</p>
+          </div>
+        {{ end }}
+      {{ end }}
+{{ end }}

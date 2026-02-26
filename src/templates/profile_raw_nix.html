@@ -1,0 +1,49 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Raw Nix</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Raw Nix</h3>
+  <form method="post" action="/profiles/{{ .Profile.ID }}/raw-nix">
+    <div class="form-group">
+      <label for="profile-raw-nix">Raw Nix (Optional Escape Hatch)</label>
+      <textarea id="profile-raw-nix" name="raw_nix" class="form-item" rows="16" placeholder="{ config, pkgs, ... }: { }">{{ .Profile.RawNix }}</textarea>
+      <small class="muted-text">Use this for advanced overrides that do not fit package or kernel settings.</small>
+    </div>
+    <p class="muted-text">Raw Nix changes create a new profile revision.</p>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Raw Nix</button>
+      <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

@@ -1,0 +1,61 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Settings</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Metadata</h3>
+  <form method="post" action="/profiles/{{ .Profile.ID }}/edit">
+    <div class="form-group">
+      <label for="profile-fleets">Fleets</label>
+      <select id="profile-fleets" name="fleet_ids" class="form-item" multiple required>
+        {{ range .Fleets }}
+        <option value="{{ .ID }}"{{ if index $.SelectedFleetIDs .ID }} selected{{ end }}>{{ .Name }}</option>
+        {{ end }}
+      </select>
+      <small class="muted-text">Hold Ctrl (or Cmd on macOS) to select multiple fleets.</small>
+    </div>
+    <div class="form-group">
+      <label for="profile-name">Name</label>
+      <input id="profile-name" name="name" class="form-item" value="{{ .Profile.Name }}" required />
+    </div>
+    <div class="form-group">
+      <label for="profile-description">Description</label>
+      <textarea id="profile-description" name="description" class="form-item" rows="3">{{ .Profile.Description }}</textarea>
+    </div>
+    <p class="muted-text">Updating fleets, name, or description changes metadata only.</p>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Settings</button>
+      <a href="/profiles" class="btn">Cancel</a>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

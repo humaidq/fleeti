@@ -1,0 +1,78 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Kernel</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Kernel Settings</h3>
+  <form method="post" action="/profiles/{{ .Profile.ID }}/kernel">
+    <div class="form-group">
+      <label for="profile-kernel-attr">Kernel Version</label>
+      <select id="profile-kernel-attr" name="kernel_attr" class="form-item">
+        <option value="">Default from pinned nixpkgs</option>
+        {{ range .KernelOptions }}
+        <option value="{{ .Attr }}"{{ if eq $.SelectedKernelAttr .Attr }} selected{{ end }}>
+          {{ if .Version }}{{ .Version }} ({{ .Attr }}){{ else }}{{ .Attr }}{{ end }}
+        </option>
+        {{ end }}
+      </select>
+      <small class="muted-text">Available values are discovered from the pinned nixpkgs in the nixos flake.</small>
+    </div>
+    <div class="form-group">
+      <label class="checkbox-label" for="profile-kernel-source-override-enabled">
+        <input id="profile-kernel-source-override-enabled" type="checkbox" name="kernel_source_override_enabled" value="1"{{ if .KernelSourceOverrideEnabled }} checked{{ end }} />
+        Override kernel source with repository URL
+      </label>
+      <small class="muted-text">When enabled, Fleeti applies a kernel overlay using <code>builtins.fetchGit</code>.</small>
+    </div>
+    <div class="form-group">
+      <label for="profile-kernel-source-url">Kernel Source URL</label>
+      <input id="profile-kernel-source-url" name="kernel_source_url" class="form-item" value="{{ .KernelSourceURL }}" placeholder="https://github.com/owner/linux.git" />
+      <small class="muted-text">HTTP(S) Git URL.</small>
+    </div>
+    <div class="form-group">
+      <label for="profile-kernel-source-ref">Kernel Source Ref (optional)</label>
+      <input id="profile-kernel-source-ref" name="kernel_source_ref" class="form-item" value="{{ .KernelSourceRef }}" placeholder="refs/tags/v6.19-custom" />
+      <small class="muted-text">Branch or tag to help fetch from your repository.</small>
+    </div>
+    <div class="form-group">
+      <label for="profile-kernel-source-rev">Kernel Source Revision</label>
+      <input id="profile-kernel-source-rev" name="kernel_source_rev" class="form-item" value="{{ .KernelSourceRev }}" placeholder="40-character commit SHA" />
+      <small class="muted-text">Required when source override is enabled.</small>
+    </div>
+    <p class="muted-text">Kernel changes create a new profile revision.</p>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Kernel Settings</button>
+      <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

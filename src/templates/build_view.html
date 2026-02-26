@@ -1,0 +1,142 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Build Details</h2>
+  <div class="page-header-actions">
+    <a href="/builds/{{ .Build.ID }}/logs" class="btn">{{ if eq .Build.Status "running" }}Live Log{{ else }}View Log{{ end }}</a>
+    <a href="/builds" class="btn">Back to Builds</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Build.Version }}</h3>
+  <div class="build-log-meta">
+    <div class="build-log-meta-item">
+      <span class="muted-text">Build ID</span>
+      <code>{{ .Build.ID }}</code>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Profile</span>
+      <span>{{ .Build.ProfileName }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Profile Revision</span>
+      <span>r{{ .Build.ProfileRevision }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Fleet</span>
+      <span>{{ if .Build.FleetName }}{{ .Build.FleetName }}{{ else }}-{{ end }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Created (UTC)</span>
+      <span>{{ .Build.CreatedAt }}</span>
+    </div>
+  </div>
+
+  <div class="build-log-status-row">
+    <span class="muted-text">Build Status</span>
+    <span class="status-badge status-{{ .Build.Status }}">{{ .Build.Status }}</span>
+  </div>
+
+  <div class="build-log-status-row">
+    <span class="muted-text">Installer Status</span>
+    {{ if eq .Build.InstallerStatus "not_requested" }}
+    <span class="muted-text">not_requested</span>
+    {{ else }}
+    <span class="status-badge status-{{ .Build.InstallerStatus }}">{{ .Build.InstallerStatus }}</span>
+    <a href="/builds/{{ .Build.ID }}/installer/logs">{{ if eq .Build.InstallerStatus "running" }}Live Log{{ else }}View Log{{ end }}</a>
+    {{ end }}
+  </div>
+
+  {{ if and (eq .Build.Status "succeeded") (ne .Build.InstallerStatus "queued") (ne .Build.InstallerStatus "running") (ne .Build.InstallerStatus "succeeded") }}
+  <form method="post" action="/builds/{{ .Build.ID }}/installer" class="inline-form">
+    <button type="submit" class="btn">Build Installer</button>
+  </form>
+  {{ else if or (eq .Build.InstallerStatus "queued") (eq .Build.InstallerStatus "running") }}
+  <p class="muted-text">Installer build is in progress.</p>
+  {{ end }}
+</section>
+
+<section class="section-card">
+  <h3>Primary Artifact Links</h3>
+  <div class="list-card-list">
+    <div class="list-card">
+      <div class="list-card-title">Update Artifact</div>
+      {{ if .Build.Artifact }}
+      <div class="build-artifact-actions">
+        <a href="{{ .Build.Artifact }}" class="btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download Update</a>
+      </div>
+      <code class="build-link-text">{{ .Build.Artifact }}</code>
+      {{ else }}
+      <p class="muted-text">Update artifact is not available yet.</p>
+      {{ end }}
+    </div>
+
+    <div class="list-card">
+      <div class="list-card-title">Installer Artifact</div>
+      {{ if .Build.InstallerArtifact }}
+      <div class="build-artifact-actions">
+        <a href="{{ .Build.InstallerArtifact }}" class="btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download Installer</a>
+      </div>
+      <code class="build-link-text">{{ .Build.InstallerArtifact }}</code>
+      {{ else if or (eq .Build.InstallerStatus "queued") (eq .Build.InstallerStatus "running") }}
+      <p class="muted-text">Installer artifact is still being built.</p>
+      {{ else }}
+      <p class="muted-text">Installer artifact is not available yet.</p>
+      {{ end }}
+    </div>
+  </div>
+</section>
+
+<section class="section-card">
+  <h3>All Update Artifacts</h3>
+  {{ if .UpdateArtifactLinks }}
+  <div class="list-card-list">
+    {{ range .UpdateArtifactLinks }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .Name }}</div>
+      <code class="build-link-text">{{ .URL }}</code>
+      <div class="build-artifact-actions">
+        <a href="{{ .URL }}" class="btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download</a>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No update artifacts published yet.</p>
+  {{ end }}
+</section>
+
+<section class="section-card">
+  <h3>All Installer Artifacts</h3>
+  {{ if .InstallerArtifactLinks }}
+  <div class="list-card-list">
+    {{ range .InstallerArtifactLinks }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .Name }}</div>
+      <code class="build-link-text">{{ .URL }}</code>
+      <div class="build-artifact-actions">
+        <a href="{{ .URL }}" class="btn"><i class="fa-solid fa-download" aria-hidden="true"></i> Download</a>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No installer artifacts published yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

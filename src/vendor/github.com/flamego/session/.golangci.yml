@@ -1,0 +1,19 @@
+linters-settings:
+  nakedret:
+    max-func-lines: 0 # Disallow any unnamed return statement
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - nakedret
+    - gofmt
+    - rowserrcheck
+    - unconvert
+    - goimports
+    - unused

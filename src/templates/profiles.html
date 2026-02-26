@@ -1,0 +1,45 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  <h2>Profiles</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/new" class="btn">Create Profile</a>
+    <a href="/" class="btn">Dashboard</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>Profile Catalog</h3>
+  {{ if .Profiles }}
+  <div class="list-card-list">
+    {{ range .Profiles }}
+    <div class="list-card profile-list-card">
+      <a href="/profiles/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-layer-group"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .Name }}</div>
+            <div class="list-card-meta profile-list-meta">
+              <span class="muted-text">Primary fleet: {{ if .FleetName }}{{ .FleetName }}{{ else }}-{{ end }}</span>
+              <span class="muted-text">Assigned fleets: {{ len .FleetIDs }}</span>
+              <span class="muted-text">Latest revision: {{ if gt .LatestRevision 0 }}r{{ .LatestRevision }}{{ else }}-{{ end }}</span>
+              <span class="muted-text">Created (UTC): {{ .CreatedAt }}</span>
+              {{ if .ConfigHash }}<span class="muted-text">Hash: <code>{{ .ConfigHash }}</code></span>{{ end }}
+            </div>
+            {{ if .Description }}
+            <p class="muted-text profile-list-description">{{ .Description }}</p>
+            {{ end }}
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No profiles yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

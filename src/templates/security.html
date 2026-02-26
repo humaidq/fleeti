@@ -1,0 +1,136 @@
+{{ template "head" . }}
+
+{{ if .Error }}
+<div class="alert alert-red">
+  <h5 class="alert-title">Error</h5>
+  <p>{{ .Error }}</p>
+</div>
+{{ end }}
+
+<div class="page-header">
+  <h2>Security</h2>
+  <div class="page-header-actions">
+    <form method="POST" action="/logout" class="inline-form">
+      <button type="submit" class="btn">Logout</button>
+    </form>
+  </div>
+</div>
+
+<div class="section-heading">Passkeys</div>
+
+<div class="alert alert-red hidden" data-webauthn-error>
+  <h5 class="alert-title">Error</h5>
+  <p data-webauthn-error-message></p>
+</div>
+
+<div class="form-group">
+  <label for="passkey-label" class="item-title">New passkey label (optional)</label>
+  <input type="text" id="passkey-label" class="form-item" placeholder="MacBook Pro, iPhone" />
+</div>
+
+<div class="form-group">
+  <button
+    type="button"
+    class="btn"
+    data-webauthn-register
+    data-start-url="/webauthn/passkey/start"
+    data-finish-url="/webauthn/passkey/finish"
+    data-passkey-label-input="#passkey-label"
+  >Add passkey</button>
+</div>
+
+{{ if .Passkeys }}
+<div class="list-card-list">
+  {{ range .Passkeys }}
+  <div class="list-card">
+    <div class="list-card-title">{{ .Label }}</div>
+    <div class="list-card-meta">
+      <span class="muted-text">Created {{ .CreatedAt.Format "Jan 2, 2006" }}</span>
+      {{ if .LastUsed }}
+      <span class="muted-text" title="{{ .LastUsed.Format "Jan 2, 2006 15:04" }}">Last used {{ .LastUsed.Format "Jan 2, 2006" }}</span>
+      {{ else }}
+      <span class="muted-text">Never used</span>
+      {{ end }}
+    </div>
+    {{ if gt $.PasskeyCount 1 }}
+    <div class="list-card-meta">
+      <form method="POST" action="/security/passkeys/{{ .ID }}/delete" class="inline-form">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    </div>
+    {{ end }}
+  </div>
+  {{ end }}
+</div>
+{{ else }}
+<p class="muted-text">No passkeys registered.</p>
+{{ end }}
+
+<script src="/webauthn.js" defer></script>
+
+{{ if .IsAdmin }}
+<div class="section-heading">User Provisioning</div>
+
+{{ if .InviteError }}
+<div class="alert alert-red">
+  <h5 class="alert-title">Error</h5>
+  <p>{{ .InviteError }}</p>
+</div>
+{{ end }}
+
+<form method="POST" action="/security/invites" class="form-group">
+  <label for="invite-display-name" class="item-title">Display name (optional)</label>
+  <input type="text" id="invite-display-name" name="display_name" class="form-item" placeholder="Guest" />
+  <p class="muted-text">Invites expire 24 hours after creation.</p>
+  <div class="form-group">
+    <button type="submit" class="btn">Create invite</button>
+  </div>
+</form>
+
+{{ if .UserInvites }}
+<div class="list-card-list">
+  {{ range .UserInvites }}
+  <div class="list-card">
+    <div class="list-card-title">{{ .DisplayName }}</div>
+    <div class="list-card-meta">
+      <span class="muted-text">Created {{ .CreatedAt.Format "Jan 2, 2006" }}</span>
+      <span class="muted-text" title="{{ .ExpiresAt.Format "Jan 2, 2006 15:04" }}">Expires {{ .ExpiresIn }}</span>
+    </div>
+    <div class="list-card-meta">
+      <a href="{{ .SetupURL }}" class="btn" target="_blank" rel="noreferrer">Open setup link</a>
+      <form method="POST" action="/security/invites/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Revoke this invite?');">
+        <button type="submit" class="btn btn-danger">Revoke</button>
+      </form>
+    </div>
+  </div>
+  {{ end }}
+</div>
+{{ else }}
+<p class="muted-text">No pending invites.</p>
+{{ end }}
+
+{{ if .ExpiredUserInvites }}
+<p class="muted-text">Expired invites (regenerate to issue a new setup link):</p>
+<div class="list-card-list">
+  {{ range .ExpiredUserInvites }}
+  <div class="list-card">
+    <div class="list-card-title">{{ .DisplayName }}</div>
+    <div class="list-card-meta">
+      <span class="muted-text">Created {{ .CreatedAt.Format "Jan 2, 2006" }}</span>
+      <span class="muted-text" title="{{ .ExpiresAt.Format "Jan 2, 2006 15:04" }}">Expired {{ .ExpiresAt.Format "Jan 2, 2006" }}</span>
+    </div>
+    <div class="list-card-meta">
+      <form method="POST" action="/security/invites/{{ .ID }}/regenerate" class="inline-form" onsubmit="return confirm('Regenerate this invite link?');">
+        <button type="submit" class="btn">Regenerate link</button>
+      </form>
+      <form method="POST" action="/security/invites/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Delete this expired invite?');">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    </div>
+  </div>
+  {{ end }}
+</div>
+{{ end }}
+{{ end }}
+
+{{ template "foot" . }}

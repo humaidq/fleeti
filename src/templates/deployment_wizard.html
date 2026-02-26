@@ -1,0 +1,275 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  <h2>Deployment Wizard</h2>
+  <div class="page-header-actions">
+    <a href="/" class="btn">Dashboard</a>
+    <a href="/rollouts" class="btn">Rollouts</a>
+  </div>
+</div>
+
+<section class="section-card wizard-intro-card">
+  <h3>Guided Deployment Chain</h3>
+  <p>Follow the chain in order: Fleet -> Profile -> Build -> Release -> Rollout. You can revisit this page anytime and change an earlier step to run the process again.</p>
+  <p class="muted-text">Devices are provisioned separately after OS installation. Use the Devices page to register and track installed systems.</p>
+  <div class="wizard-intro-actions">
+    <a href="/devices" class="btn">Open Devices</a>
+    <a href="{{ .WizardResetPath }}" class="btn">Reset Wizard</a>
+  </div>
+</section>
+
+<section id="wizard-step-fleet" class="section-card wizard-step-card{{ if .WizardHasFleet }} wizard-step-complete{{ end }}">
+  <div class="wizard-step-title-row">
+    <span class="wizard-step-number">1</span>
+    <h3>Choose or Create Fleet</h3>
+  </div>
+  <p class="muted-text">Fleet = target device group (example: HPC Lab 1, HPC Lab 2).</p>
+  {{ if .WizardHasFleet }}
+  <div class="wizard-selected-block">
+    <p><strong>Selected fleet:</strong> {{ .WizardSelectedFleetName }}</p>
+    <div class="form-actions">
+      <a href="{{ .WizardResetPath }}" class="btn">Change Fleet</a>
+    </div>
+  </div>
+  {{ else }}
+  <div class="wizard-grid-two">
+    <form method="post" action="/deployments/wizard/fleet" class="wizard-form-block">
+      <input type="hidden" name="intent" value="select" />
+      <div class="form-group">
+        <label for="wizard-fleet-id">Use existing fleet</label>
+        <select id="wizard-fleet-id" name="fleet_id" class="form-item" required>
+          <option value="">Select fleet</option>
+          {{ range .WizardFleets }}
+          <option value="{{ .ID }}"{{ if eq $.WizardFleetID .ID }} selected{{ end }}>{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+      <button type="submit" class="btn">Use Fleet</button>
+    </form>
+
+    <form method="post" action="/deployments/wizard/fleet" class="wizard-form-block">
+      <input type="hidden" name="intent" value="create" />
+      <div class="form-group">
+        <label for="wizard-fleet-name">Create new fleet</label>
+        <input id="wizard-fleet-name" name="name" class="form-item" placeholder="HPC Lab 1" required />
+      </div>
+      <div class="form-group">
+        <label for="wizard-fleet-description">Description</label>
+        <textarea id="wizard-fleet-description" name="description" class="form-item" rows="2" placeholder="Workstation cluster for thermal analysis"></textarea>
+      </div>
+      <button type="submit" class="btn">Create Fleet</button>
+    </form>
+  </div>
+  {{ end }}
+</section>
+
+<section id="wizard-step-profile" class="section-card wizard-step-card{{ if .WizardHasProfile }} wizard-step-complete{{ end }}">
+  <div class="wizard-step-title-row">
+    <span class="wizard-step-number">2</span>
+    <h3>Choose or Create Profile</h3>
+  </div>
+  <p class="muted-text">Profile = packages, kernel, and system configuration.</p>
+  {{ if .WizardHasFleet }}
+  {{ if .WizardHasProfile }}
+  <div class="wizard-selected-block">
+    <p><strong>Selected profile:</strong> {{ .WizardSelectedProfileName }}</p>
+    <p class="muted-text">Need packages, kernel, or raw nix changes? <a href="/profiles/{{ .WizardProfileID }}">Open this profile summary</a>, then continue the chain.</p>
+    <div class="form-actions">
+      <a href="{{ .WizardKeepFleetPath }}" class="btn">Change Profile</a>
+    </div>
+  </div>
+  {{ else }}
+  <div class="wizard-grid-two">
+    <form method="post" action="/deployments/wizard/profile" class="wizard-form-block">
+      <input type="hidden" name="intent" value="select" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <div class="form-group">
+        <label for="wizard-profile-id">Use existing profile</label>
+        <select id="wizard-profile-id" name="profile_id" class="form-item" required>
+          <option value="">Select profile</option>
+          {{ range .WizardProfiles }}
+          <option value="{{ .ID }}"{{ if eq $.WizardProfileID .ID }} selected{{ end }}>{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+      <button type="submit" class="btn">Use Profile</button>
+    </form>
+
+    <form method="post" action="/deployments/wizard/profile" class="wizard-form-block">
+      <input type="hidden" name="intent" value="create" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <div class="form-group">
+        <label for="wizard-profile-name">Create new profile</label>
+        <input id="wizard-profile-name" name="name" class="form-item" placeholder="hpc-lab-base" required />
+      </div>
+      <div class="form-group">
+        <label for="wizard-profile-description">Description</label>
+        <textarea id="wizard-profile-description" name="description" class="form-item" rows="2" placeholder="Base profile for HPC Lab systems"></textarea>
+      </div>
+      <button type="submit" class="btn">Create Profile</button>
+    </form>
+  </div>
+  {{ end }}
+  {{ else }}
+  <p class="muted-text">Select a fleet first.</p>
+  {{ end }}
+</section>
+
+<section id="wizard-step-build" class="section-card wizard-step-card{{ if .WizardHasBuild }} wizard-step-complete{{ end }}">
+  <div class="wizard-step-title-row">
+    <span class="wizard-step-number">3</span>
+    <h3>Choose or Create Build</h3>
+  </div>
+  <p class="muted-text">Build converts the selected profile revision into artifacts.</p>
+  {{ if .WizardHasProfile }}
+  {{ if .WizardHasBuild }}
+  <div class="wizard-selected-block">
+    <p><strong>Selected build:</strong> {{ .WizardSelectedBuildVersion }}</p>
+    <p>Status: <span class="status-badge status-{{ .WizardSelectedBuildStatus }}">{{ .WizardSelectedBuildStatus }}</span></p>
+    <p class="muted-text">Created at: {{ .WizardSelectedBuildCreatedAt }} UTC</p>
+    <div class="form-actions">
+      <a href="{{ .WizardBuildLogsPath }}" class="btn">Open Build Logs</a>
+      <a href="{{ .WizardKeepProfilePath }}" class="btn">Change Build</a>
+    </div>
+  </div>
+  {{ else }}
+  <div class="wizard-grid-two">
+    <form method="post" action="/deployments/wizard/build" class="wizard-form-block">
+      <input type="hidden" name="intent" value="select" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
+      <div class="form-group">
+        <label for="wizard-build-id">Use existing build</label>
+        <select id="wizard-build-id" name="build_id" class="form-item" required>
+          <option value="">Select build</option>
+          {{ range .WizardBuilds }}
+          <option value="{{ .ID }}"{{ if eq $.WizardBuildID .ID }} selected{{ end }}>{{ .Version }} ({{ .Status }})</option>
+          {{ end }}
+        </select>
+      </div>
+      <button type="submit" class="btn">Use Build</button>
+    </form>
+
+    <form method="post" action="/deployments/wizard/build" class="wizard-form-block">
+      <input type="hidden" name="intent" value="create" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
+      <div class="form-group">
+        <label for="wizard-build-version">Create new build version</label>
+        <input id="wizard-build-version" name="version" class="form-item" placeholder="v1.1.0" pattern="^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$" title="Use semver with v prefix, for example v1.1.0" required />
+      </div>
+      <button type="submit" class="btn">Queue Build</button>
+    </form>
+  </div>
+  {{ end }}
+  {{ else }}
+  <p class="muted-text">Select a profile first.</p>
+  {{ end }}
+</section>
+
+<section id="wizard-step-release" class="section-card wizard-step-card{{ if .WizardHasRelease }} wizard-step-complete{{ end }}">
+  <div class="wizard-step-title-row">
+    <span class="wizard-step-number">4</span>
+    <h3>Choose or Create Release</h3>
+  </div>
+  <p class="muted-text">Release promotes a successful build into a deployable version.</p>
+  {{ if .WizardHasBuild }}
+  {{ if .WizardHasRelease }}
+  <div class="wizard-selected-block">
+    <p><strong>Selected release:</strong> {{ .WizardSelectedReleaseVersion }} ({{ .WizardSelectedReleaseChannel }}) <span class="status-badge status-{{ .WizardSelectedReleaseStatus }}">{{ if eq .WizardSelectedReleaseStatus "withdrawn" }}taken down{{ else }}{{ .WizardSelectedReleaseStatus }}{{ end }}</span></p>
+    <p class="muted-text">Published at: {{ .WizardSelectedReleasePublishedAt }} UTC</p>
+    <div class="form-actions">
+      <a href="{{ .WizardKeepBuildPath }}" class="btn">Change Release</a>
+    </div>
+  </div>
+  {{ else }}
+  {{ if .WizardBuildReadyForRelease }}
+  <div class="wizard-grid-two">
+    <form method="post" action="/deployments/wizard/release" class="wizard-form-block">
+      <input type="hidden" name="intent" value="select" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
+      <input type="hidden" name="build_id" value="{{ .WizardBuildID }}" />
+      <div class="form-group">
+        <label for="wizard-release-id">Use existing release</label>
+        <select id="wizard-release-id" name="release_id" class="form-item" required>
+          <option value="">Select release</option>
+          {{ range .WizardReleases }}
+          <option value="{{ .ID }}"{{ if eq $.WizardReleaseID .ID }} selected{{ end }}{{ if eq .Status "withdrawn" }} disabled{{ end }}>{{ .Version }} ({{ .Channel }}{{ if eq .Status "withdrawn" }} - taken down{{ end }})</option>
+          {{ end }}
+        </select>
+      </div>
+      <button type="submit" class="btn">Use Release</button>
+    </form>
+
+    <form method="post" action="/deployments/wizard/release" class="wizard-form-block">
+      <input type="hidden" name="intent" value="create" />
+      <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+      <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
+      <input type="hidden" name="build_id" value="{{ .WizardBuildID }}" />
+      <div class="form-group">
+        <label for="wizard-release-version">Create release version</label>
+        <input id="wizard-release-version" name="version" class="form-item" value="{{ .WizardSelectedBuildVersion }}" placeholder="v1.1.0" pattern="^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$" title="Use semver with v prefix, for example v1.1.0" required />
+      </div>
+      <div class="form-group">
+        <label for="wizard-release-channel">Channel</label>
+        <input id="wizard-release-channel" name="channel" class="form-item" value="stable" />
+      </div>
+      <div class="form-group">
+        <label for="wizard-release-notes">Notes</label>
+        <textarea id="wizard-release-notes" name="notes" class="form-item" rows="2" placeholder="QA notes and release context"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label" for="wizard-qa-confirmed">
+          <input id="wizard-qa-confirmed" type="checkbox" name="qa_confirmed" value="1" />
+          QA check completed for this build
+        </label>
+      </div>
+      <button type="submit" class="btn">Create Release</button>
+    </form>
+  </div>
+  {{ else }}
+  <p class="muted-text">Selected build is <strong>{{ .WizardSelectedBuildStatus }}</strong>. Wait for a successful build before creating a release.</p>
+  {{ end }}
+  {{ end }}
+  {{ else }}
+  <p class="muted-text">Select a build first.</p>
+  {{ end }}
+</section>
+
+<section id="wizard-step-rollout" class="section-card wizard-step-card">
+  <div class="wizard-step-title-row">
+    <span class="wizard-step-number">5</span>
+    <h3>Create Rollout</h3>
+  </div>
+  <p class="muted-text">Rollout activates release artifacts for the selected fleet and sets desired release on devices in that fleet.</p>
+  {{ if .WizardCanRollout }}
+  <div class="wizard-selected-block">
+    <p><strong>Target fleet:</strong> {{ .WizardSelectedFleetName }}</p>
+    <p><strong>Target release:</strong> {{ .WizardSelectedReleaseVersion }}</p>
+  </div>
+  <form method="post" action="/deployments/wizard/rollout" class="wizard-rollout-form">
+    <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
+    <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
+    <input type="hidden" name="build_id" value="{{ .WizardBuildID }}" />
+    <input type="hidden" name="release_id" value="{{ .WizardReleaseID }}" />
+    <div class="form-group">
+      <label class="checkbox-label" for="wizard-confirm-rollout">
+        <input id="wizard-confirm-rollout" type="checkbox" name="confirm_rollout" value="1" />
+        Confirm this rollout target
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Create Rollout</button>
+      <a href="{{ .WizardKeepProfilePath }}" class="btn">Run Chain Again</a>
+      <a href="{{ .WizardKeepFleetPath }}" class="btn">Change Profile</a>
+    </div>
+  </form>
+  {{ else if and .WizardHasRelease (eq .WizardSelectedReleaseStatus "withdrawn") }}
+  <p class="muted-text">Selected release is taken down. Choose another release before rollout.</p>
+  {{ else }}
+  <p class="muted-text">Complete fleet, profile, build, and release steps first.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

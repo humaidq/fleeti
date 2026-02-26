@@ -1,0 +1,109 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Rollout Summary</h2>
+  <div class="page-header-actions">
+    {{ if .HasRelease }}
+    <a href="/releases/{{ .Rollout.ReleaseID }}" class="btn">View Release</a>
+    {{ end }}
+    <a href="/rollouts" class="btn">Back to Rollouts</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Rollout.ReleaseVersion }} rollout</h3>
+  <div class="build-log-meta">
+    <div class="build-log-meta-item">
+      <span class="muted-text">Rollout ID</span>
+      <code>{{ .Rollout.ID }}</code>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Fleet</span>
+      <span>{{ .Rollout.FleetName }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Release Version</span>
+      <span>{{ .Rollout.ReleaseVersion }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Strategy</span>
+      <span>{{ .Rollout.Strategy }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Stage</span>
+      <span>{{ .Rollout.StagePercent }}%</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Started (UTC)</span>
+      <span>{{ if .Rollout.StartedAt }}{{ .Rollout.StartedAt }}{{ else }}-{{ end }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Completed (UTC)</span>
+      <span>{{ if .Rollout.CompletedAt }}{{ .Rollout.CompletedAt }}{{ else }}-{{ end }}</span>
+    </div>
+    <div class="build-log-meta-item">
+      <span class="muted-text">Created (UTC)</span>
+      <span>{{ .Rollout.CreatedAt }}</span>
+    </div>
+  </div>
+
+  <div class="build-log-status-row">
+    <span class="muted-text">Rollout Status</span>
+    <span class="status-badge status-{{ .Rollout.Status }}">{{ .Rollout.Status }}</span>
+  </div>
+
+  <div class="build-log-status-row">
+    <span class="muted-text">Release Status</span>
+    <span class="status-badge status-{{ .Rollout.ReleaseStatus }}">{{ if eq .Rollout.ReleaseStatus "withdrawn" }}taken down{{ else }}{{ .Rollout.ReleaseStatus }}{{ end }}</span>
+  </div>
+</section>
+
+<section class="section-card">
+  <h3>Navigation</h3>
+  <div class="list-card-list">
+    {{ if .HasRelease }}
+    <div class="list-card release-list-card">
+      <a href="/releases/{{ .Rollout.ReleaseID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-tag"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">Open Release Summary</div>
+            <div class="list-card-meta"><span class="muted-text">View release details and related rollouts.</span></div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+
+    <div class="list-card">
+      <a href="/releases" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-list"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">Browse Releases</div>
+            <div class="list-card-meta"><span class="muted-text">Navigate all published releases.</span></div>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+{{ template "foot" . }}

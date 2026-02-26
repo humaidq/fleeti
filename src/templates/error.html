@@ -1,0 +1,9 @@
+{{ template "head" . }}
+
+<section class="section-card">
+  <h2>Something went wrong</h2>
+  <p>{{ if .Error }}{{ .Error }}{{ else }}Unknown error{{ end }}</p>
+  <p><a href="/" class="btn">Back to dashboard</a></p>
+</section>
+
+{{ template "foot" . }}

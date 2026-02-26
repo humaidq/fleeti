@@ -1,0 +1,42 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  <h2>Login</h2>
+</div>
+
+{{ if .Error }}
+<div class="alert alert-red">
+  <h5 class="alert-title">Error</h5>
+  <p>{{ .Error }}</p>
+</div>
+{{ end }}
+
+<div class="alert alert-red hidden" data-webauthn-error>
+  <h5 class="alert-title">Error</h5>
+  <p data-webauthn-error-message></p>
+</div>
+
+<p>Private access, this instance is not publicly accessible.</p>
+<div class="form-group">
+  <label class="checkbox-label">
+    <input type="checkbox" id="stay-logged-in" checked />
+    Stay logged in
+  </label>
+</div>
+<div class="form-group">
+  <button
+    type="button"
+    class="btn btn-block"
+    data-webauthn-login
+    data-start-url="/webauthn/login/start"
+    data-finish-url="/webauthn/login/finish"
+    data-redirect-url="{{ .Next }}"
+    data-next-path="{{ .Next }}"
+    data-remember-input="#stay-logged-in"
+  >Authenticate</button>
+</div>
+<p class="muted-text" data-webauthn-support></p>
+
+<script src="/webauthn.js" defer></script>
+
+{{ template "foot" . }}

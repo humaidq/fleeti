@@ -1,0 +1,56 @@
+{{ template "head" . }}
+
+<div class="page-header">
+  <h2>Fleets</h2>
+  <div class="page-header-actions">
+    <a href="/" class="btn">Dashboard</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>Create Fleet</h3>
+  <details class="add-item-details">
+    <summary class="add-item-summary">+ Create Fleet</summary>
+    <form method="post" action="/fleets" class="add-item-form">
+      <div class="add-item-field">
+        <label for="fleet-name">Name</label>
+        <input id="fleet-name" name="name" class="form-item" required />
+      </div>
+      <div class="add-item-field">
+        <label for="fleet-description">Description</label>
+        <textarea id="fleet-description" name="description" class="form-item" rows="3"></textarea>
+      </div>
+      <button type="submit" class="btn">Create Fleet</button>
+    </form>
+  </details>
+</section>
+
+<section class="section-card">
+  <h3>Fleet Inventory</h3>
+  {{ if .Fleets }}
+  <div class="table-card">
+    <table class="contacts-list">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Description</th>
+          <th>Created (UTC)</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .Fleets }}
+        <tr>
+          <td><strong>{{ .Name }}</strong></td>
+          <td>{{ if .Description }}{{ .Description }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+          <td>{{ .CreatedAt }}</td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="muted-text">No fleets yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}
