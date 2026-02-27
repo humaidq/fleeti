@@ -930,15 +930,16 @@ label {
   }
 
   .groundwave-header {
+    overflow: visible;
     margin-top: 0;
-    margin-bottom: 0.75rem;
-    border-radius: var(--radius-md);
+    margin-bottom: 0;
+    border-radius: 0;
   }
 
   main {
     flex: 1 0 auto;
     padding: 1rem;
-    border-radius: var(--radius-md);
+    border-radius: 0;
   }
 
   .navbar {
@@ -947,8 +948,8 @@ label {
   }
 
   footer {
-    margin-top: 0.75rem;
-    border-radius: var(--radius-md);
+    margin-top: 0;
+    border-radius: 0;
   }
 
   .header-container {

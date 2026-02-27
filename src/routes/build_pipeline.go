@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/humaidq/fleeti/v2/db"
+	nixosWorkspace "github.com/humaidq/fleeti/v2/nixos"
 )
 
 const (
@@ -133,21 +134,6 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("build version is required")
 	}
 
-	workingDir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve working directory: %w", err)
-	}
-
-	nixosSourceDir := filepath.Join(workingDir, nixosSourceDirName)
-	nixosInfo, err := os.Stat(nixosSourceDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to access nixos source directory: %w", err)
-	}
-
-	if !nixosInfo.IsDir() {
-		return "", fmt.Errorf("nixos source is not a directory: %s", nixosSourceDir)
-	}
-
 	updatesDir, err := resolveUpdatesDirectory()
 	if err != nil {
 		return "", err
@@ -165,7 +151,7 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 	}()
 
 	workspaceNixOSDir := filepath.Join(workspaceRoot, nixosSourceDirName)
-	if err := copyDirectoryWithFilters(nixosSourceDir, workspaceNixOSDir); err != nil {
+	if err := populateNixOSWorkspace(workspaceNixOSDir); err != nil {
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
@@ -239,21 +225,6 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
 	}
 
-	workingDir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve working directory: %w", err)
-	}
-
-	nixosSourceDir := filepath.Join(workingDir, nixosSourceDirName)
-	nixosInfo, err := os.Stat(nixosSourceDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to access nixos source directory: %w", err)
-	}
-
-	if !nixosInfo.IsDir() {
-		return "", fmt.Errorf("nixos source is not a directory: %s", nixosSourceDir)
-	}
-
 	updatesDir, err := resolveUpdatesDirectory()
 	if err != nil {
 		return "", err
@@ -271,7 +242,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 	}()
 
 	workspaceNixOSDir := filepath.Join(workspaceRoot, nixosSourceDirName)
-	if err := copyDirectoryWithFilters(nixosSourceDir, workspaceNixOSDir); err != nil {
+	if err := populateNixOSWorkspace(workspaceNixOSDir); err != nil {
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
@@ -290,6 +261,93 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 	}
 
 	return artifactURL, nil
+}
+
+func populateNixOSWorkspace(destinationDir string) error {
+	nixosSourceDir, err := resolveNixOSFlakeDirectory()
+	if err == nil {
+		if copyErr := copyDirectoryWithFilters(nixosSourceDir, destinationDir); copyErr != nil {
+			return copyErr
+		}
+
+		return nil
+	}
+
+	logger.Warn("failed to resolve nixos source directory from disk; falling back to embedded workspace", "error", err)
+
+	if copyErr := copyEmbeddedNixOSWorkspace(destinationDir); copyErr != nil {
+		return copyErr
+	}
+
+	return nil
+}
+
+func copyEmbeddedNixOSWorkspace(destinationDir string) error {
+	if err := os.MkdirAll(destinationDir, 0o750); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	return fs.WalkDir(nixosWorkspace.Workspace, ".", func(currentPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		if currentPath == "." {
+			return nil
+		}
+
+		if shouldSkipWorkspaceEntry(currentPath, entry) {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+
+			return nil
+		}
+
+		pathSegments := strings.Split(currentPath, "/")
+		targetPath := filepath.Join(append([]string{destinationDir}, pathSegments...)...)
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("failed to read file info for %s: %w", currentPath, err)
+		}
+
+		if entry.IsDir() {
+			mode := info.Mode().Perm()
+			if mode == 0 {
+				mode = 0o750
+			}
+
+			if err := os.MkdirAll(targetPath, mode); err != nil {
+				return fmt.Errorf("failed to create directory %s: %w", currentPath, err)
+			}
+
+			return nil
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o750); err != nil {
+			return fmt.Errorf("failed to create parent directory for %s: %w", currentPath, err)
+		}
+
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file type in embedded workspace copy: %s", currentPath)
+		}
+
+		contents, err := fs.ReadFile(nixosWorkspace.Workspace, currentPath)
+		if err != nil {
+			return fmt.Errorf("failed to read embedded file %s: %w", currentPath, err)
+		}
+
+		mode := info.Mode().Perm()
+		if mode == 0 {
+			mode = 0o640
+		}
+
+		if err := os.WriteFile(targetPath, contents, mode); err != nil {
+			return fmt.Errorf("failed to write embedded file %s: %w", currentPath, err)
+		}
+
+		return nil
+	})
 }
 
 func copyDirectoryWithFilters(sourceDir, destinationDir string) error {
@@ -365,7 +423,7 @@ func copyDirectoryWithFilters(sourceDir, destinationDir string) error {
 func shouldSkipWorkspaceEntry(relPath string, entry fs.DirEntry) bool {
 	base := filepath.Base(relPath)
 
-	if base == "result" || base == "demo-disk.raw" {
+	if base == "result" || base == "demo-disk.raw" || base == "embed.go" {
 		return true
 	}
 

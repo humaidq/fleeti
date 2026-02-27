@@ -72,7 +72,7 @@
 
       imports = [
         ./nix/flake-module.nix
-        ./nixos/flake-module.nix
+        ./src/nixos/flake-module.nix
         ./packages/flake-module.nix
       ];
 

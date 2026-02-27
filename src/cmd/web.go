@@ -96,8 +96,10 @@ func start(ctx context.Context, cmd *cli.Command) error {
 	f.Use(flamego.Recovery())
 	f.Map(webAuthn)
 	f.Use(session.Sessioner(session.Options{
-		Config: session.MemoryConfig{
-			Lifetime: 14 * 24 * time.Hour,
+		Initer: db.PostgresSessionIniter(),
+		Config: db.PostgresSessionConfig{
+			Lifetime:  14 * 24 * time.Hour,
+			TableName: "flamego_sessions",
 		},
 		Cookie: session.CookieOptions{
 			MaxAge:   14 * 24 * 60 * 60,

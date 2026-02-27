@@ -42,9 +42,10 @@ var (
 	ErrRolloutNotFound             = errors.New("rollout not found")
 	ErrRolloutFleetReleaseMismatch = errors.New("release does not belong to fleet")
 
-	ErrInvalidProfileConfigJSON   = errors.New("profile configuration must be valid JSON")
-	ErrProfileConfigMustBeObject  = errors.New("profile configuration JSON must be an object")
-	ErrInvalidConfigSchemaVersion = errors.New("invalid profile config schema version")
+	ErrInvalidProfileConfigJSON             = errors.New("profile configuration must be valid JSON")
+	ErrProfileConfigMustBeObject            = errors.New("profile configuration JSON must be an object")
+	ErrInvalidConfigSchemaVersion           = errors.New("invalid profile config schema version")
+	ErrInvalidPostgresSessionIniterArgument = errors.New("invalid PostgresSessionIniter argument")
 
 	ErrProfileRequired     = errors.New("profile is required")
 	ErrBuildRequired       = errors.New("build is required")

@@ -22,6 +22,7 @@ import (
 
 const (
 	kernelOptionsCommandTimeout = 20 * time.Second
+	kernelOptionsFlakeRef       = "github:humaidq/fleeti#nixosConfigurations.fleeti.pkgs.linuxKernel.kernels"
 )
 
 var profileKernelAttrPattern = regexp.MustCompile(`^linux_[0-9]+_[0-9]+(_hardened)?$`)
@@ -49,11 +50,6 @@ type kernelOptionJSON struct {
 }
 
 func listAvailableKernelOptions(ctx context.Context) ([]KernelOption, error) {
-	nixosDir, err := resolveNixOSFlakeDirectory()
-	if err != nil {
-		return nil, err
-	}
-
 	evalCtx, cancel := context.WithTimeout(ctx, kernelOptionsCommandTimeout)
 	defer cancel()
 
@@ -61,11 +57,10 @@ func listAvailableKernelOptions(ctx context.Context) ([]KernelOption, error) {
 		"nix",
 		"eval",
 		"--json",
-		".#nixosConfigurations.fleeti.pkgs.linuxKernel.kernels",
+		kernelOptionsFlakeRef,
 		"--apply",
 		`kernels: let names = builtins.filter (n: builtins.match "^linux_[0-9]+_[0-9]+(_hardened)?$" n != null) (builtins.attrNames kernels); rows = builtins.map (n: let v = builtins.tryEval (kernels.${n}.version); in if v.success then { attr = n; version = v.value; } else null) names; in builtins.filter (x: x != null) rows`,
 	)
-	cmd.Dir = nixosDir
 
 	output, err := cmd.Output()
 	if err != nil {
@@ -153,7 +148,9 @@ func resolveNixOSFlakeDirectory() (string, error) {
 
 	candidates := []string{
 		filepath.Join(workingDir, "nixos"),
+		filepath.Join(workingDir, "src", "nixos"),
 		filepath.Clean(filepath.Join(workingDir, "..", "nixos")),
+		filepath.Clean(filepath.Join(workingDir, "..", "src", "nixos")),
 	}
 
 	for _, candidate := range candidates {

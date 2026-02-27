@@ -4,7 +4,7 @@ Prefer precise, minimal changes that match existing patterns.
 
 ## Scope and Current State
 - Main application code is in `src/` (Go web app + DB + templates).
-- Nix flake configuration is at repo root and in `nixos/`.
+- Nix flake configuration is at repo root and in `src/nixos/`.
 - Vendor dependencies are committed under `src/vendor/`.
 - Update artifacts appear in `updates/` (generated, usually not source edits).
 
@@ -23,7 +23,7 @@ If any of these files are added later, treat them as higher-priority instruction
 - `src/templates/`: server-rendered HTML templates (embedded)
 - `src/static/`: CSS/static assets (embedded)
 - `nix/`: devshell, formatting, checks, pre-commit hook config
-- `nixos/`: NixOS image/update package definitions
+- `src/nixos/`: NixOS image/update package definitions
 
 ## Working Directories
 - Run most Go commands from `src/` because `go.mod` is at `src/go.mod`.
@@ -144,7 +144,7 @@ Current status: there are no `*_test.go` files yet, so these commands report `[n
 
 ## Things to Avoid
 - Do not edit `src/vendor/` manually unless intentionally vendoring dependencies.
-- Do not treat `result/`, `nixos/result/`, or `updates/` as source of truth.
+- Do not treat `result/`, `src/nixos/result/`, or `updates/` as source of truth.
 - Do not introduce new tooling configs unless needed; prefer existing Nix + Go setup.
 
 ## Practical Agent Checklist Before Finishing
