@@ -5,6 +5,9 @@
 package routes
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -200,5 +203,82 @@ func TestWriteBuildOverridesModuleAddsKernelSourceOverlay(t *testing.T) {
 
 	if !strings.Contains(generated, "boot.kernelPackages = lib.mkForce pkgs.fleetiKernelPackages;") {
 		t.Fatalf("expected kernelPackages override to use overlay output, got: %s", generated)
+	}
+}
+
+func TestWriteBuildOverridesModuleWritesKernelPatchesInOrder(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	firstPatch := []byte("diff --git a/first b/first\n")
+	secondPatch := []byte("diff --git a/second b/second\n")
+
+	firstDigest := sha256.Sum256(firstPatch)
+	secondDigest := sha256.Sum256(secondPatch)
+
+	err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{
+		Attr: "linux_6_19",
+		SourceOverride: ProfileKernelSourceOverride{
+			Enabled: true,
+			URL:     "https://github.com/example/linux.git",
+			Rev:     "abcd1234abcd1234abcd1234abcd1234abcd1234",
+			Patches: []ProfileKernelPatch{
+				{
+					Name:          "0002-second.patch",
+					SHA256:        hex.EncodeToString(secondDigest[:]),
+					ContentBase64: base64.StdEncoding.EncodeToString(secondPatch),
+				},
+				{
+					Name:          "0001-first.patch",
+					SHA256:        hex.EncodeToString(firstDigest[:]),
+					ContentBase64: base64.StdEncoding.EncodeToString(firstPatch),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read generated build overrides file: %v", err)
+	}
+
+	generated := string(content)
+	if !strings.Contains(generated, "patchedKernelSource = pkgs.runCommand") {
+		t.Fatalf("expected patched source runCommand block, got: %s", generated)
+	}
+
+	firstCommandIndex := strings.Index(generated, "patch -p1 < ${./kernel-patches/001-0002-second.patch}")
+	secondCommandIndex := strings.Index(generated, "patch -p1 < ${./kernel-patches/002-0001-first.patch}")
+	if firstCommandIndex < 0 || secondCommandIndex < 0 || firstCommandIndex > secondCommandIndex {
+		t.Fatalf("expected patch commands in configured order, got: %s", generated)
+	}
+
+	firstPatchPath := filepath.Join(modulesDir, "kernel-patches", "001-0002-second.patch")
+	secondPatchPath := filepath.Join(modulesDir, "kernel-patches", "002-0001-first.patch")
+
+	firstBytes, err := os.ReadFile(firstPatchPath)
+	if err != nil {
+		t.Fatalf("failed to read first patch file: %v", err)
+	}
+
+	secondBytes, err := os.ReadFile(secondPatchPath)
+	if err != nil {
+		t.Fatalf("failed to read second patch file: %v", err)
+	}
+
+	if string(firstBytes) != string(secondPatch) {
+		t.Fatalf("unexpected first patch file content: %q", string(firstBytes))
+	}
+
+	if string(secondBytes) != string(firstPatch) {
+		t.Fatalf("unexpected second patch file content: %q", string(secondBytes))
 	}
 }

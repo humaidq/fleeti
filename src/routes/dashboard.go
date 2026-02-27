@@ -23,6 +23,8 @@ import (
 	"github.com/humaidq/fleeti/v2/db"
 )
 
+const profileKernelMultipartMemoryLimit = 32 << 20
+
 func writePlain(c flamego.Context, value string) {
 	if _, err := c.ResponseWriter().Write([]byte(value)); err != nil {
 		logger.Error("failed to write response", "error", err)
@@ -1076,6 +1078,7 @@ func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template
 	data["KernelSourceURL"] = kernelConfig.SourceOverride.URL
 	data["KernelSourceRef"] = kernelConfig.SourceOverride.Ref
 	data["KernelSourceRev"] = kernelConfig.SourceOverride.Rev
+	data["KernelSourcePatches"] = kernelConfig.SourceOverride.Patches
 	data["ProfileNavActive"] = "kernel"
 	data["CanManageProfile"] = true
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Kernel"))
@@ -1324,10 +1327,16 @@ func UpdateProfileKernel(c flamego.Context, s session.Session) {
 
 	path := profileKernelPath(profileID)
 
-	if err := c.Request().ParseForm(); err != nil {
+	if err := c.Request().ParseMultipartForm(profileKernelMultipartMemoryLimit); err != nil {
 		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
 
 		return
+	}
+
+	if c.Request().MultipartForm != nil {
+		defer func() {
+			_ = c.Request().MultipartForm.RemoveAll()
+		}()
 	}
 
 	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
@@ -1354,7 +1363,22 @@ func UpdateProfileKernel(c flamego.Context, s session.Session) {
 		return
 	}
 
+	existingKernelConfig, err := profileKernelConfigFromProfileConfig(profile.ConfigJSON)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
 	kernelConfig := profileKernelConfigFromForm(c.Request().Form)
+	patches, err := profileKernelSourcePatchesFromMultipartForm(c.Request().Form, c.Request().MultipartForm, existingKernelConfig.SourceOverride.Patches)
+	if err != nil {
+		redirectWithMessage(c, s, path, FlashError, err.Error())
+
+		return
+	}
+
+	kernelConfig.SourceOverride.Patches = patches
 	kernelAttrs := map[string]struct{}{}
 	if kernelConfig.Attr != "" {
 		kernelOptions, err := listAvailableKernelOptions(c.Request().Context())
@@ -2261,6 +2285,16 @@ func profileKernelSummary(kernelConfig ProfileKernelConfig) string {
 	summary = kernelConfig.Attr
 	if kernelConfig.SourceOverride.Enabled {
 		summary += " with source override"
+
+		patchCount := len(kernelConfig.SourceOverride.Patches)
+		if patchCount > 0 {
+			summary += fmt.Sprintf(" (%d patch", patchCount)
+			if patchCount != 1 {
+				summary += "es"
+			}
+
+			summary += ")"
+		}
 	}
 
 	return summary

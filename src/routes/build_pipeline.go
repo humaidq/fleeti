@@ -7,6 +7,9 @@ package routes
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -29,6 +32,7 @@ const (
 	updatesArtifactsDirName = "artifacts"
 	installerArtifactsDir   = "installer"
 	buildOverridesPath      = "modules/build-overrides.nix"
+	kernelPatchesDirPath    = "modules/kernel-patches"
 	buildLogFlushSize       = 4096
 	updateBuildTarget       = ".#fleeti-update"
 	installerBuildTarget    = ".#fleeti-installer"
@@ -535,7 +539,7 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 		return fmt.Errorf("failed to build package expressions: %w", err)
 	}
 
-	kernelOverridesBlock, err := buildKernelOverridesBlock(kernelConfig)
+	kernelOverridesBlock, err := buildKernelOverridesBlock(workspaceNixOSDir, kernelConfig)
 	if err != nil {
 		return fmt.Errorf("failed to build kernel overrides: %w", err)
 	}
@@ -575,9 +579,13 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	return nil
 }
 
-func buildKernelOverridesBlock(kernelConfig ProfileKernelConfig) (string, error) {
+func buildKernelOverridesBlock(workspaceNixOSDir string, kernelConfig ProfileKernelConfig) (string, error) {
 	normalized := normalizeProfileKernelConfig(kernelConfig)
 	if normalized.Attr == "" {
+		if _, err := prepareKernelPatchFiles(workspaceNixOSDir, []ProfileKernelPatch{}); err != nil {
+			return "", err
+		}
+
 		return "", nil
 	}
 
@@ -587,7 +595,30 @@ func buildKernelOverridesBlock(kernelConfig ProfileKernelConfig) (string, error)
 
 	kernelExpression := "pkgs.linuxKernel.kernels." + normalized.Attr
 	if !normalized.SourceOverride.Enabled {
+		if _, err := prepareKernelPatchFiles(workspaceNixOSDir, []ProfileKernelPatch{}); err != nil {
+			return "", err
+		}
+
 		return fmt.Sprintf("boot.kernelPackages = lib.mkForce (pkgs.linuxPackagesFor %s);", kernelExpression), nil
+	}
+
+	patchPaths, err := prepareKernelPatchFiles(workspaceNixOSDir, normalized.SourceOverride.Patches)
+	if err != nil {
+		return "", err
+	}
+
+	patchedSourceDefinition := ""
+	sourceExpression := "sourceOverride"
+	if len(patchPaths) > 0 {
+		patchedSourceDefinition = fmt.Sprintf(`
+			patchedKernelSource = pkgs.runCommand "fleeti-kernel-source-with-patches" {
+				nativeBuildInputs = [ pkgs.gnupatch ];
+			} ''
+				cp -R ${sourceOverride} "$out"
+				chmod -R u+w "$out"
+				cd "$out"
+%s			'';`, buildKernelPatchApplyCommands(patchPaths))
+		sourceExpression = "patchedKernelSource"
 	}
 
 	refLine := ""
@@ -602,11 +633,11 @@ func buildKernelOverridesBlock(kernelConfig ProfileKernelConfig) (string, error)
 			sourceOverride = builtins.fetchGit {
 				url = "%s";
 				rev = "%s";
-%s			};
+%s			};%s
 		in
 		baseKernel.override {
 			argsOverride = {
-				src = sourceOverride;
+				src = %s;
 				version = baseKernel.version;
 				modDirVersion = baseKernel.version;
 			};
@@ -621,7 +652,95 @@ boot.kernelPackages = lib.mkForce pkgs.fleetiKernelPackages;`,
 		escapeNixString(normalized.SourceOverride.URL),
 		escapeNixString(normalized.SourceOverride.Rev),
 		refLine,
+		patchedSourceDefinition,
+		sourceExpression,
 	), nil
+}
+
+func prepareKernelPatchFiles(workspaceNixOSDir string, patches []ProfileKernelPatch) ([]string, error) {
+	kernelPatchesDir := filepath.Join(workspaceNixOSDir, kernelPatchesDirPath)
+
+	if err := os.RemoveAll(kernelPatchesDir); err != nil {
+		return nil, fmt.Errorf("failed to reset kernel patch directory: %w", err)
+	}
+
+	if len(patches) == 0 {
+		return []string{}, nil
+	}
+
+	if err := os.MkdirAll(kernelPatchesDir, 0o750); err != nil {
+		return nil, fmt.Errorf("failed to create kernel patch directory: %w", err)
+	}
+
+	relativePatchPaths := make([]string, 0, len(patches))
+	for index, patch := range patches {
+		decodedContent, err := base64.StdEncoding.DecodeString(strings.TrimSpace(patch.ContentBase64))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode kernel patch payload: %w", err)
+		}
+
+		digest := sha256.Sum256(decodedContent)
+		if hex.EncodeToString(digest[:]) != strings.ToLower(strings.TrimSpace(patch.SHA256)) {
+			return nil, fmt.Errorf("kernel patch checksum mismatch")
+		}
+
+		safeName := sanitizeKernelPatchFileName(patch.Name)
+		fileName := fmt.Sprintf("%03d-%s", index+1, safeName)
+		if !strings.HasSuffix(strings.ToLower(fileName), ".patch") {
+			fileName += ".patch"
+		}
+
+		patchPath := filepath.Join(kernelPatchesDir, fileName)
+		if err := os.WriteFile(patchPath, decodedContent, 0o640); err != nil {
+			return nil, fmt.Errorf("failed to write kernel patch file %s: %w", fileName, err)
+		}
+
+		relativePatchPaths = append(relativePatchPaths, "./kernel-patches/"+fileName)
+	}
+
+	return relativePatchPaths, nil
+}
+
+func sanitizeKernelPatchFileName(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "kernel-patch.patch"
+	}
+
+	builder := strings.Builder{}
+	builder.Grow(len(trimmed))
+
+	for _, value := range trimmed {
+		if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') || value == '-' || value == '_' || value == '.' {
+			builder.WriteRune(value)
+
+			continue
+		}
+
+		builder.WriteByte('-')
+	}
+
+	safeName := strings.Trim(builder.String(), "-._")
+	if safeName == "" {
+		safeName = "kernel-patch"
+	}
+
+	return safeName
+}
+
+func buildKernelPatchApplyCommands(patchPaths []string) string {
+	if len(patchPaths) == 0 {
+		return ""
+	}
+
+	commands := strings.Builder{}
+	for _, patchPath := range patchPaths {
+		commands.WriteString("\t\t\t\tpatch -p1 < ${")
+		commands.WriteString(patchPath)
+		commands.WriteString("}\n")
+	}
+
+	return commands.String()
 }
 
 var (

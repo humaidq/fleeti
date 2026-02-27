@@ -6,14 +6,20 @@ package routes
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,17 +27,29 @@ import (
 )
 
 const (
-	kernelOptionsCommandTimeout = 20 * time.Second
-	kernelOptionsFlakeRef       = "github:humaidq/fleeti#nixosConfigurations.fleeti.pkgs.linuxKernel.kernels"
+	kernelOptionsCommandTimeout  = 20 * time.Second
+	kernelOptionsFlakeRef        = "github:humaidq/fleeti#nixosConfigurations.fleeti.pkgs.linuxKernel.kernels"
+	profileKernelPatchFileField  = "kernel_patch_files"
+	maxKernelPatchCount          = 32
+	maxKernelPatchSizeBytes      = 512 * 1024
+	maxKernelPatchTotalSizeBytes = 4 * 1024 * 1024
 )
 
 var profileKernelAttrPattern = regexp.MustCompile(`^linux_[0-9]+_[0-9]+(_hardened)?$`)
+var profileKernelPatchSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+type ProfileKernelPatch struct {
+	Name          string
+	SHA256        string
+	ContentBase64 string
+}
 
 type ProfileKernelSourceOverride struct {
 	Enabled bool
 	URL     string
 	Ref     string
 	Rev     string
+	Patches []ProfileKernelPatch
 }
 
 type ProfileKernelConfig struct {
@@ -236,11 +254,49 @@ func profileKernelConfigFromProfileConfig(configJSON string) (ProfileKernelConfi
 		return ProfileKernelConfig{}, err
 	}
 
+	rawPatches, exists := decodedSourceOverride["patches"]
+	patches := make([]ProfileKernelPatch, 0)
+	if exists && rawPatches != nil {
+		decodedPatches, ok := rawPatches.([]any)
+		if !ok {
+			return ProfileKernelConfig{}, db.ErrInvalidProfileConfigJSON
+		}
+
+		for _, rawPatch := range decodedPatches {
+			decodedPatch, ok := rawPatch.(map[string]any)
+			if !ok {
+				return ProfileKernelConfig{}, db.ErrInvalidProfileConfigJSON
+			}
+
+			name, err := optionalStringField(decodedPatch, "name")
+			if err != nil {
+				return ProfileKernelConfig{}, err
+			}
+
+			shaValue, err := optionalStringField(decodedPatch, "sha256")
+			if err != nil {
+				return ProfileKernelConfig{}, err
+			}
+
+			contentBase64, err := optionalStringField(decodedPatch, "content_base64")
+			if err != nil {
+				return ProfileKernelConfig{}, err
+			}
+
+			patches = append(patches, ProfileKernelPatch{
+				Name:          name,
+				SHA256:        shaValue,
+				ContentBase64: contentBase64,
+			})
+		}
+	}
+
 	configValue.SourceOverride = ProfileKernelSourceOverride{
 		Enabled: enabled,
 		URL:     sourceURL,
 		Ref:     sourceRef,
 		Rev:     sourceRev,
+		Patches: patches,
 	}
 
 	return normalizeProfileKernelConfig(configValue), nil
@@ -260,19 +316,254 @@ func profileKernelConfigFromForm(values url.Values) ProfileKernelConfig {
 	})
 }
 
+type orderedKernelPatch struct {
+	Order    int
+	Position int
+	Patch    ProfileKernelPatch
+}
+
+func profileKernelSourcePatchesFromMultipartForm(values url.Values, form *multipart.Form, existing []ProfileKernelPatch) ([]ProfileKernelPatch, error) {
+	files := make([]*multipart.FileHeader, 0)
+	if form != nil {
+		files = form.File[profileKernelPatchFileField]
+	}
+
+	return profileKernelSourcePatchesFromForm(values, files, existing)
+}
+
+func profileKernelSourcePatchesFromForm(values url.Values, files []*multipart.FileHeader, existing []ProfileKernelPatch) ([]ProfileKernelPatch, error) {
+	ordered := make([]orderedKernelPatch, 0, len(existing)+len(files))
+	position := 0
+	totalSizeBytes := 0
+
+	for index, patch := range existing {
+		if strings.TrimSpace(values.Get(existingKernelPatchRemoveFieldName(index))) != "" {
+			continue
+		}
+
+		normalizedPatch := normalizeProfileKernelPatch(patch)
+		patchSize, err := decodedKernelPatchContentSize(normalizedPatch)
+		if err != nil {
+			return nil, err
+		}
+
+		totalSizeBytes += patchSize
+		if totalSizeBytes > maxKernelPatchTotalSizeBytes {
+			return nil, fmt.Errorf("kernel patch payload is too large")
+		}
+
+		orderValue, err := parseKernelPatchOrder(values.Get(existingKernelPatchOrderFieldName(index)), index+1)
+		if err != nil {
+			return nil, err
+		}
+
+		ordered = append(ordered, orderedKernelPatch{
+			Order:    orderValue,
+			Position: position,
+			Patch:    normalizedPatch,
+		})
+		position++
+	}
+
+	newPatchOrders := values["kernel_new_patch_order"]
+	for index, fileHeader := range files {
+		patch, err := profileKernelPatchFromUpload(fileHeader)
+		if err != nil {
+			return nil, err
+		}
+
+		patchSize, err := decodedKernelPatchContentSize(patch)
+		if err != nil {
+			return nil, err
+		}
+
+		totalSizeBytes += patchSize
+		if totalSizeBytes > maxKernelPatchTotalSizeBytes {
+			return nil, fmt.Errorf("kernel patch payload is too large")
+		}
+
+		orderDefault := len(existing) + index + 1
+		orderValueText := ""
+		if index < len(newPatchOrders) {
+			orderValueText = newPatchOrders[index]
+		}
+
+		orderValue, err := parseKernelPatchOrder(orderValueText, orderDefault)
+		if err != nil {
+			return nil, err
+		}
+
+		ordered = append(ordered, orderedKernelPatch{
+			Order:    orderValue,
+			Position: position,
+			Patch:    patch,
+		})
+		position++
+	}
+
+	if len(ordered) > maxKernelPatchCount {
+		return nil, fmt.Errorf("kernel patch count exceeds limit")
+	}
+
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Order == ordered[j].Order {
+			return ordered[i].Position < ordered[j].Position
+		}
+
+		return ordered[i].Order < ordered[j].Order
+	})
+
+	patches := make([]ProfileKernelPatch, 0, len(ordered))
+	for _, entry := range ordered {
+		patches = append(patches, entry.Patch)
+	}
+
+	return patches, nil
+}
+
+func existingKernelPatchOrderFieldName(index int) string {
+	return "kernel_existing_patch_order_" + strconv.Itoa(index)
+}
+
+func existingKernelPatchRemoveFieldName(index int) string {
+	return "kernel_existing_patch_remove_" + strconv.Itoa(index)
+}
+
+func parseKernelPatchOrder(value string, fallback int) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return fallback, nil
+	}
+
+	parsed, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("patch order must be a positive integer")
+	}
+
+	if parsed == 0 {
+		return fallback, nil
+	}
+
+	if parsed < 0 {
+		return 0, fmt.Errorf("patch order must be a positive integer")
+	}
+
+	return parsed, nil
+}
+
+func profileKernelPatchFromUpload(fileHeader *multipart.FileHeader) (ProfileKernelPatch, error) {
+	if fileHeader == nil {
+		return ProfileKernelPatch{}, fmt.Errorf("kernel patch upload is invalid")
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return ProfileKernelPatch{}, fmt.Errorf("failed to open kernel patch upload: %w", err)
+	}
+
+	defer func() {
+		_ = file.Close()
+	}()
+
+	content, err := io.ReadAll(io.LimitReader(file, maxKernelPatchSizeBytes+1))
+	if err != nil {
+		return ProfileKernelPatch{}, fmt.Errorf("failed to read kernel patch upload: %w", err)
+	}
+
+	if len(content) == 0 {
+		return ProfileKernelPatch{}, fmt.Errorf("kernel patch upload cannot be empty")
+	}
+
+	if len(content) > maxKernelPatchSizeBytes {
+		return ProfileKernelPatch{}, fmt.Errorf("kernel patch file is too large")
+	}
+
+	name := strings.TrimSpace(filepath.Base(fileHeader.Filename))
+	if !isValidProfileKernelPatchName(name) {
+		return ProfileKernelPatch{}, fmt.Errorf("kernel patch filename is invalid")
+	}
+
+	digest := sha256.Sum256(content)
+
+	return ProfileKernelPatch{
+		Name:          name,
+		SHA256:        hex.EncodeToString(digest[:]),
+		ContentBase64: base64.StdEncoding.EncodeToString(content),
+	}, nil
+}
+
+func decodedKernelPatchContentSize(patch ProfileKernelPatch) (int, error) {
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(patch.ContentBase64))
+	if err != nil {
+		return 0, fmt.Errorf("kernel patch payload is invalid")
+	}
+
+	return len(decoded), nil
+}
+
+func normalizeProfileKernelPatch(patch ProfileKernelPatch) ProfileKernelPatch {
+	patch.Name = strings.TrimSpace(patch.Name)
+	patch.SHA256 = strings.ToLower(strings.TrimSpace(patch.SHA256))
+	patch.ContentBase64 = strings.TrimSpace(patch.ContentBase64)
+
+	return patch
+}
+
+func isValidProfileKernelPatchName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+
+	if len(trimmed) > 128 {
+		return false
+	}
+
+	if strings.Contains(trimmed, "/") || strings.Contains(trimmed, "\\") {
+		return false
+	}
+
+	if trimmed == "." || trimmed == ".." {
+		return false
+	}
+
+	for _, value := range trimmed {
+		if value < 32 || value > 126 {
+			return false
+		}
+	}
+
+	return true
+}
+
 func normalizeProfileKernelConfig(config ProfileKernelConfig) ProfileKernelConfig {
 	config.Attr = strings.TrimSpace(config.Attr)
 	config.SourceOverride.URL = strings.TrimSpace(config.SourceOverride.URL)
 	config.SourceOverride.Ref = strings.TrimSpace(config.SourceOverride.Ref)
 	config.SourceOverride.Rev = strings.TrimSpace(config.SourceOverride.Rev)
+	config.SourceOverride.Patches = normalizeProfileKernelPatches(config.SourceOverride.Patches)
 
 	if !config.SourceOverride.Enabled {
 		config.SourceOverride.URL = ""
 		config.SourceOverride.Ref = ""
 		config.SourceOverride.Rev = ""
+		config.SourceOverride.Patches = []ProfileKernelPatch{}
 	}
 
 	return config
+}
+
+func normalizeProfileKernelPatches(patches []ProfileKernelPatch) []ProfileKernelPatch {
+	if len(patches) == 0 {
+		return []ProfileKernelPatch{}
+	}
+
+	normalized := make([]ProfileKernelPatch, 0, len(patches))
+	for _, patch := range patches {
+		normalized = append(normalized, normalizeProfileKernelPatch(patch))
+	}
+
+	return normalized
 }
 
 func validateProfileKernelConfig(config ProfileKernelConfig, allowedAttrs map[string]struct{}) error {
@@ -291,6 +582,10 @@ func validateProfileKernelConfig(config ProfileKernelConfig, allowedAttrs map[st
 	}
 
 	if !normalized.SourceOverride.Enabled {
+		if len(normalized.SourceOverride.Patches) > 0 {
+			return fmt.Errorf("kernel patches require source override to be enabled")
+		}
+
 		return nil
 	}
 
@@ -313,6 +608,44 @@ func validateProfileKernelConfig(config ProfileKernelConfig, allowedAttrs map[st
 
 	if parsedURL.Scheme != "https" && parsedURL.Scheme != "http" {
 		return fmt.Errorf("kernel source override URL must use http or https")
+	}
+
+	if len(normalized.SourceOverride.Patches) > maxKernelPatchCount {
+		return fmt.Errorf("kernel patch count exceeds limit")
+	}
+
+	totalSizeBytes := 0
+	for _, patch := range normalized.SourceOverride.Patches {
+		if !isValidProfileKernelPatchName(patch.Name) {
+			return fmt.Errorf("kernel patch filename is invalid")
+		}
+
+		if !profileKernelPatchSHA256Pattern.MatchString(patch.SHA256) {
+			return fmt.Errorf("kernel patch checksum is invalid")
+		}
+
+		content, err := base64.StdEncoding.DecodeString(patch.ContentBase64)
+		if err != nil {
+			return fmt.Errorf("kernel patch payload is invalid")
+		}
+
+		if len(content) == 0 {
+			return fmt.Errorf("kernel patch payload cannot be empty")
+		}
+
+		if len(content) > maxKernelPatchSizeBytes {
+			return fmt.Errorf("kernel patch file is too large")
+		}
+
+		digest := sha256.Sum256(content)
+		if hex.EncodeToString(digest[:]) != patch.SHA256 {
+			return fmt.Errorf("kernel patch checksum mismatch")
+		}
+
+		totalSizeBytes += len(content)
+		if totalSizeBytes > maxKernelPatchTotalSizeBytes {
+			return fmt.Errorf("kernel patch payload is too large")
+		}
 	}
 
 	return nil
@@ -342,6 +675,19 @@ func profileConfigWithKernel(configJSON string, kernelConfig ProfileKernelConfig
 
 			if normalized.SourceOverride.Ref != "" {
 				sourceOverride["ref"] = normalized.SourceOverride.Ref
+			}
+
+			if len(normalized.SourceOverride.Patches) > 0 {
+				patches := make([]map[string]any, 0, len(normalized.SourceOverride.Patches))
+				for _, patch := range normalized.SourceOverride.Patches {
+					patches = append(patches, map[string]any{
+						"name":           patch.Name,
+						"sha256":         patch.SHA256,
+						"content_base64": patch.ContentBase64,
+					})
+				}
+
+				sourceOverride["patches"] = patches
 			}
 
 			kernel["source_override"] = sourceOverride

@@ -32,7 +32,7 @@
 
 <section class="section-card">
   <h3>Kernel Settings</h3>
-  <form method="post" action="/profiles/{{ .Profile.ID }}/kernel">
+  <form method="post" action="/profiles/{{ .Profile.ID }}/kernel" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-kernel-attr">Kernel Version</label>
@@ -59,14 +59,54 @@
       <small class="muted-text">HTTP(S) Git URL.</small>
     </div>
     <div class="form-group">
-      <label for="profile-kernel-source-ref">Kernel Source Ref (optional)</label>
-      <input id="profile-kernel-source-ref" name="kernel_source_ref" class="form-item" value="{{ .KernelSourceRef }}" placeholder="refs/tags/v6.19-custom" />
-      <small class="muted-text">Branch or tag to help fetch from your repository.</small>
-    </div>
-    <div class="form-group">
       <label for="profile-kernel-source-rev">Kernel Source Revision</label>
       <input id="profile-kernel-source-rev" name="kernel_source_rev" class="form-item" value="{{ .KernelSourceRev }}" placeholder="40-character commit SHA" />
       <small class="muted-text">Required when source override is enabled.</small>
+    </div>
+    {{ if .KernelSourcePatches }}
+    <div class="form-group">
+      <label>Existing Kernel Patches</label>
+      <div class="table-card">
+        <table class="contacts-list responsive-stack-table">
+          <thead>
+            <tr>
+              <th>Patch</th>
+              <th>SHA256</th>
+              <th>Order</th>
+              <th>Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range $i, $patch := .KernelSourcePatches }}
+            <tr>
+              <td data-label="Patch"><code>{{ $patch.Name }}</code></td>
+              <td data-label="SHA256"><code>{{ $patch.SHA256 }}</code></td>
+              <td data-label="Order">
+                <input type="number" min="1" name="kernel_existing_patch_order_{{ $i }}" class="form-item" value="{{ printf "%d" $i }}" data-kernel-existing-order />
+              </td>
+              <td data-label="Remove">
+                <label class="checkbox-label">
+                  <input type="checkbox" name="kernel_existing_patch_remove_{{ $i }}" value="1" />
+                  Remove
+                </label>
+              </td>
+            </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      </div>
+      <small class="muted-text">Existing patches are kept unless removed. Lower order is applied first.</small>
+    </div>
+    {{ end }}
+    <div class="form-group">
+      <label for="profile-kernel-patch-files">Upload Kernel Patches (optional)</label>
+      <input id="profile-kernel-patch-files" type="file" name="kernel_patch_files" class="form-item" multiple accept=".patch,.diff,text/x-patch,text/plain" />
+      <small class="muted-text">Upload patch files and set apply order below. Patches are applied in ascending order number.</small>
+    </div>
+    <div class="form-group hidden" id="profile-kernel-new-patch-orders" data-existing-patch-count="{{ len .KernelSourcePatches }}">
+      <label>New Patch Order</label>
+      <div id="profile-kernel-new-patch-order-list"></div>
+      <small class="muted-text">When order numbers match, files keep upload order.</small>
     </div>
     <p class="muted-text">Kernel changes create a new profile revision.</p>
     <div class="form-actions">
@@ -75,5 +115,61 @@
     </div>
   </form>
 </section>
+
+<script>
+  (function () {
+    var fileInput = document.getElementById("profile-kernel-patch-files");
+    var orderContainer = document.getElementById("profile-kernel-new-patch-orders");
+    var orderList = document.getElementById("profile-kernel-new-patch-order-list");
+
+    if (!fileInput || !orderContainer || !orderList) {
+      return;
+    }
+
+    var existingCountRaw = orderContainer.getAttribute("data-existing-patch-count") || "0";
+    var existingCount = parseInt(existingCountRaw, 10);
+    if (!Number.isFinite(existingCount) || existingCount < 0) {
+      existingCount = 0;
+    }
+
+    function renderOrderFields() {
+      var files = fileInput.files;
+      orderList.innerHTML = "";
+
+      if (!files || files.length === 0) {
+        orderContainer.classList.add("hidden");
+        return;
+      }
+
+      orderContainer.classList.remove("hidden");
+
+      for (var i = 0; i < files.length; i++) {
+        var row = document.createElement("div");
+        row.className = "form-group";
+
+        var label = document.createElement("label");
+        label.textContent = files[i].name + " order";
+        row.appendChild(label);
+
+        var input = document.createElement("input");
+        input.type = "number";
+        input.name = "kernel_new_patch_order";
+        input.className = "form-item";
+        input.min = "1";
+        input.value = String(existingCount + i + 1);
+        row.appendChild(input);
+
+        orderList.appendChild(row);
+      }
+    }
+
+    fileInput.addEventListener("change", renderOrderFields);
+
+    var existingOrderInputs = document.querySelectorAll("[data-kernel-existing-order]");
+    for (var i = 0; i < existingOrderInputs.length; i++) {
+      existingOrderInputs[i].value = String(i + 1);
+    }
+  })();
+</script>
 
 {{ template "foot" . }}
