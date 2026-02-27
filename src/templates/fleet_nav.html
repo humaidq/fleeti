@@ -1,0 +1,8 @@
+{{ define "fleet_nav" }}
+<nav class="profile-section-nav" aria-label="Fleet sections">
+  <a href="/fleets/{{ .Fleet.ID }}" class="profile-section-link{{ if eq .FleetNavActive "summary" }} profile-section-link-active{{ end }}">Summary</a>
+  {{ if .CanManageFleet }}
+  <a href="/fleets/{{ .Fleet.ID }}/access" class="profile-section-link{{ if eq .FleetNavActive "access" }} profile-section-link-active{{ end }}">Access</a>
+  {{ end }}
+</nav>
+{{ end }}

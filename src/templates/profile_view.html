@@ -32,7 +32,6 @@
     Current revision: r{{ .Profile.LatestRevision }}
     {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
   </p>
-  <p class="muted-text">Visibility: {{ if eq .Profile.Visibility "visible" }}visible{{ else }}private{{ end }}</p>
   <p class="muted-text">Created (UTC): {{ .Profile.CreatedAt }}</p>
   {{ if .Profile.Description }}
   <p>{{ .Profile.Description }}</p>
@@ -53,6 +52,15 @@
           <div class="muted-text">Name, description, and assigned fleets</div>
         </div>
         <a href="/profiles/{{ .Profile.ID }}/edit" class="btn">Open Settings</a>
+      </div>
+    </div>
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Access</div>
+          <div class="muted-text">Users with full access to this profile</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/access" class="btn">Open Access</a>
       </div>
     </div>
     <div class="list-card profile-section-card">
@@ -83,8 +91,6 @@
       </div>
     </div>
   </div>
-  {{ else }}
-  <p class="muted-text">This profile is visible in read-only mode.</p>
   {{ end }}
 </section>
 

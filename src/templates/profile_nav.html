@@ -3,6 +3,7 @@
   <a href="/profiles/{{ .Profile.ID }}" class="profile-section-link{{ if eq .ProfileNavActive "summary" }} profile-section-link-active{{ end }}">Summary</a>
   {{ if .CanManageProfile }}
   <a href="/profiles/{{ .Profile.ID }}/edit" class="profile-section-link{{ if eq .ProfileNavActive "settings" }} profile-section-link-active{{ end }}">Settings</a>
+  <a href="/profiles/{{ .Profile.ID }}/access" class="profile-section-link{{ if eq .ProfileNavActive "access" }} profile-section-link-active{{ end }}">Access</a>
   <a href="/profiles/{{ .Profile.ID }}/packages" class="profile-section-link{{ if eq .ProfileNavActive "packages" }} profile-section-link-active{{ end }}">Packages</a>
   <a href="/profiles/{{ .Profile.ID }}/kernel" class="profile-section-link{{ if eq .ProfileNavActive "kernel" }} profile-section-link-active{{ end }}">Kernel</a>
   <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="profile-section-link{{ if eq .ProfileNavActive "raw_nix" }} profile-section-link-active{{ end }}">Raw Nix</a>

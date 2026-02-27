@@ -62,6 +62,7 @@ in
       ];
       requires = [ "postgresql.service" ];
       path = [
+        pkgs.git
         pkgs.nix
       ];
 

@@ -1,0 +1,72 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Fleet Access</h2>
+  <div class="page-header-actions">
+    <a href="/fleets/{{ .Fleet.ID }}" class="btn">View Summary</a>
+    <a href="/fleets" class="btn">Back to Fleets</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Fleet.Name }}</h3>
+  <p class="muted-text">Created (UTC): {{ .Fleet.CreatedAt }}</p>
+  {{ if .Fleet.Description }}
+  <p>{{ .Fleet.Description }}</p>
+  {{ end }}
+  {{ template "fleet_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Users With Access</h3>
+  <p class="muted-text">Users added here get full access to this fleet, including the ability to add more users.</p>
+
+  {{ if .FleetViewers }}
+  <div class="list-card-list">
+    {{ range .FleetViewers }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .DisplayName }}</div>
+      <div class="list-card-meta">
+        <form method="post" action="/fleets/{{ $.Fleet.ID }}/users/{{ .ID }}/delete" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+          <button type="submit" class="btn btn-danger">Remove</button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No users added yet.</p>
+  {{ end }}
+
+  <form method="post" action="/fleets/{{ .Fleet.ID }}/users" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="fleet-access-user-id">Add user</label>
+      <select id="fleet-access-user-id" name="user_id" class="form-item">
+        <option value="">Select user</option>
+        {{ range .ViewerUsers }}
+        <option value="{{ .ID }}">{{ .DisplayName }}</option>
+        {{ end }}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Add User</button>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

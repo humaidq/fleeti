@@ -21,7 +21,6 @@ var (
 	ErrInviteNotExpired                 = errors.New("invite is not expired")
 	ErrAccessDenied                     = errors.New("access denied")
 	ErrAdminRequired                    = errors.New("admin required")
-	ErrInvalidVisibility                = errors.New("invalid visibility")
 
 	ErrNameRequired = errors.New("name is required")
 

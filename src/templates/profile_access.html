@@ -1,0 +1,72 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Access</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>Users With Access</h3>
+  <p class="muted-text">Users added here get full access to this profile, including the ability to add more users.</p>
+
+  {{ if .ProfileViewers }}
+  <div class="list-card-list">
+    {{ range .ProfileViewers }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .DisplayName }}</div>
+      <div class="list-card-meta">
+        <form method="post" action="/profiles/{{ $.Profile.ID }}/users/{{ .ID }}/delete" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+          <button type="submit" class="btn btn-danger">Remove</button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No users added yet.</p>
+  {{ end }}
+
+  <form method="post" action="/profiles/{{ .Profile.ID }}/users" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="profile-access-user-id">Add user</label>
+      <select id="profile-access-user-id" name="user_id" class="form-item">
+        <option value="">Select user</option>
+        {{ range .ViewerUsers }}
+        <option value="{{ .ID }}">{{ .DisplayName }}</option>
+        {{ end }}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Add User</button>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

@@ -40,7 +40,6 @@
           <div class="list-card-entry-body">
             <div class="list-card-title">{{ .Name }}</div>
             <div class="list-card-meta fleet-list-meta">
-              <span class="muted-text">Visibility: {{ if eq .Visibility "visible" }}visible{{ else }}private{{ end }}</span>
               <span class="muted-text">Created (UTC): {{ .CreatedAt }}</span>
             </div>
             {{ if .Description }}

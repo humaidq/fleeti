@@ -7,73 +7,32 @@ package routes
 import (
 	"testing"
 
-	"github.com/google/uuid"
-
 	"github.com/humaidq/fleeti/v2/db"
 )
 
-func TestCanViewProfileAllowsOwnerAndVisibleProfiles(t *testing.T) {
+func TestManageableFleetsForUserReturnsEmptyForNilUser(t *testing.T) {
 	t.Parallel()
 
-	owner := &db.User{ID: uuid.New()}
-	other := &db.User{ID: uuid.New()}
+	fleets := []db.Fleet{{ID: "fleet-a"}, {ID: "fleet-b"}}
 
-	privateOwned := db.ProfileEdit{OwnerUserID: owner.ID.String(), Visibility: db.VisibilityPrivate}
-	privateForeign := db.ProfileEdit{OwnerUserID: other.ID.String(), Visibility: db.VisibilityPrivate}
-	visibleForeign := db.ProfileEdit{OwnerUserID: other.ID.String(), Visibility: db.VisibilityVisible}
-
-	if !canViewProfile(owner, privateOwned) {
-		t.Fatal("expected owner to view private profile")
-	}
-
-	if canViewProfile(owner, privateForeign) {
-		t.Fatal("expected non-owner to be blocked from private profile")
-	}
-
-	if !canViewProfile(owner, visibleForeign) {
-		t.Fatal("expected visible profile to be viewable")
+	managed := manageableFleetsForUser(nil, fleets)
+	if len(managed) != 0 {
+		t.Fatalf("expected 0 fleets, got %d", len(managed))
 	}
 }
 
-func TestCanManageProfileRequiresOwnerOrAdmin(t *testing.T) {
+func TestManageableFleetsForUserReturnsAllVisibleToUser(t *testing.T) {
 	t.Parallel()
 
-	owner := &db.User{ID: uuid.New()}
-	admin := &db.User{ID: uuid.New(), IsAdmin: true}
-	other := &db.User{ID: uuid.New()}
-
-	profile := db.ProfileEdit{OwnerUserID: owner.ID.String(), Visibility: db.VisibilityPrivate}
-
-	if !canManageProfile(owner, profile) {
-		t.Fatal("expected owner to manage profile")
-	}
-
-	if !canManageProfile(admin, profile) {
-		t.Fatal("expected admin to manage profile")
-	}
-
-	if canManageProfile(other, profile) {
-		t.Fatal("expected non-owner user to be blocked from profile management")
-	}
-}
-
-func TestManageableFleetsForUserFiltersToOwnedFleets(t *testing.T) {
-	t.Parallel()
-
-	owner := &db.User{ID: uuid.New()}
-	other := uuid.New().String()
+	user := &db.User{}
 
 	fleets := []db.Fleet{
-		{ID: "fleet-a", OwnerUserID: owner.ID.String(), Visibility: db.VisibilityPrivate},
-		{ID: "fleet-b", OwnerUserID: other, Visibility: db.VisibilityVisible},
+		{ID: "fleet-a"},
+		{ID: "fleet-b"},
 	}
 
-	filtered := manageableFleetsForUser(owner, fleets)
-	if len(filtered) != 1 {
-		t.Fatalf("expected 1 fleet, got %d", len(filtered))
-	}
-
-	if filtered[0].ID != "fleet-a" {
-		t.Fatalf("expected fleet-a, got %s", filtered[0].ID)
+	managed := manageableFleetsForUser(user, fleets)
+	if len(managed) != len(fleets) {
+		t.Fatalf("expected %d fleets, got %d", len(fleets), len(managed))
 	}
 }

@@ -7,8 +7,10 @@ package routes
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -145,6 +147,10 @@ func renderUpdateChecksumsForDirectory(updatesDir string) ([]byte, error) {
 func collectUpdateArtifacts(updatesDir string) ([]updateArtifact, error) {
 	entries, err := os.ReadDir(updatesDir)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return []updateArtifact{}, nil
+		}
+
 		return nil, fmt.Errorf("failed to read updates directory: %w", err)
 	}
 
