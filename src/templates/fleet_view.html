@@ -1,0 +1,128 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Fleet Summary</h2>
+  <div class="page-header-actions">
+    <a href="/fleets" class="btn">Back to Fleets</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Fleet.Name }}</h3>
+  <p class="muted-text">Visibility: {{ if eq .Fleet.Visibility "visible" }}visible{{ else }}private{{ end }}</p>
+  <p class="muted-text">Created (UTC): {{ .Fleet.CreatedAt }}</p>
+  {{ if .Fleet.Description }}
+  <p>{{ .Fleet.Description }}</p>
+  {{ else }}
+  <p class="muted-text">No description provided.</p>
+  {{ end }}
+</section>
+
+{{ if .CanManageFleet }}
+<section class="section-card" id="fleet-edit">
+  <h3>Edit</h3>
+  <form method="post" action="/fleets/{{ .Fleet.ID }}/edit">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="fleet-name">Name</label>
+      <input id="fleet-name" name="name" class="form-item" value="{{ .Fleet.Name }}" required />
+    </div>
+    <div class="form-group">
+      <label for="fleet-description">Description</label>
+      <textarea id="fleet-description" name="description" class="form-item" rows="3">{{ .Fleet.Description }}</textarea>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Edit</button>
+    </div>
+  </form>
+</section>
+{{ end }}
+
+{{ if .IsAdmin }}
+<section class="section-card" id="fleet-settings">
+  <h3>Settings</h3>
+  <form method="post" action="/fleets/{{ .Fleet.ID }}/visibility" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="fleet-visibility">Visibility</label>
+      <select id="fleet-visibility" name="visibility" class="form-item">
+        <option value="private"{{ if eq .Fleet.Visibility "private" }} selected{{ end }}>Private</option>
+        <option value="visible"{{ if eq .Fleet.Visibility "visible" }} selected{{ end }}>Visible</option>
+      </select>
+      <small class="muted-text">Only admins can change visibility permissions.</small>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Settings</button>
+    </div>
+  </form>
+</section>
+
+<section class="section-card">
+  <h3>Specific Viewers</h3>
+  <p class="muted-text">Grant individual users read access to this fleet even when private.</p>
+
+  {{ if .FleetViewers }}
+  <div class="list-card-list">
+    {{ range .FleetViewers }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .DisplayName }}</div>
+      <div class="list-card-meta">
+        <form method="post" action="/fleets/{{ $.Fleet.ID }}/viewers/{{ .ID }}/delete" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+          <button type="submit" class="btn btn-danger">Remove</button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No specific viewers yet.</p>
+  {{ end }}
+
+  <form method="post" action="/fleets/{{ .Fleet.ID }}/viewers" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="fleet-viewer-user-id">Add viewer</label>
+      <select id="fleet-viewer-user-id" name="user_id" class="form-item">
+        <option value="">Select user</option>
+        {{ range .ViewerUsers }}
+        <option value="{{ .ID }}">{{ .DisplayName }}</option>
+        {{ end }}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Add Viewer</button>
+    </div>
+  </form>
+</section>
+{{ end }}
+
+{{ if .CanManageFleet }}
+<section class="section-card">
+  <h3>Delete</h3>
+  <p class="muted-text">Permanently delete this fleet and all associated data.</p>
+  <form method="post" action="/fleets/{{ .Fleet.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this fleet and all associated data? This cannot be undone.');">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <button type="submit" class="btn btn-danger">Delete Permanently</button>
+  </form>
+</section>
+{{ end }}
+
+{{ if not .CanManageFleet }}
+<p class="muted-text">This fleet is visible in read-only mode.</p>
+{{ end }}
+
+{{ template "foot" . }}

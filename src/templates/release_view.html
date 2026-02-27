@@ -69,7 +69,7 @@
 <section class="section-card">
   <h3>Navigation</h3>
   <div class="list-card-list">
-    <div class="list-card">
+    <div class="list-card list-card-clickable">
       <a href="/builds/{{ .Release.BuildID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
@@ -82,7 +82,7 @@
         </div>
       </a>
     </div>
-    <div class="list-card">
+    <div class="list-card list-card-clickable">
       <a href="/rollouts" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
@@ -103,7 +103,7 @@
   {{ if .RelatedRollouts }}
   <div class="list-card-list">
     {{ range .RelatedRollouts }}
-    <div class="list-card rollout-list-card">
+    <div class="list-card list-card-clickable rollout-list-card">
       <a href="/rollouts/{{ .ID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">

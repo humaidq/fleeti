@@ -79,7 +79,7 @@
   <h3>Navigation</h3>
   <div class="list-card-list">
     {{ if .HasRelease }}
-    <div class="list-card release-list-card">
+    <div class="list-card list-card-clickable release-list-card">
       <a href="/releases/{{ .Rollout.ReleaseID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
@@ -94,7 +94,7 @@
     </div>
     {{ end }}
 
-    <div class="list-card">
+    <div class="list-card list-card-clickable">
       <a href="/releases" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">

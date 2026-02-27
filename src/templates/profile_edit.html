@@ -49,6 +49,45 @@
     </div>
   </form>
 </section>
+
+<section class="section-card">
+  <h3>Specific Viewers</h3>
+  <p class="muted-text">Grant individual users read access to this profile even when private.</p>
+
+  {{ if .ProfileViewers }}
+  <div class="list-card-list">
+    {{ range .ProfileViewers }}
+    <div class="list-card">
+      <div class="list-card-title">{{ .DisplayName }}</div>
+      <div class="list-card-meta">
+        <form method="post" action="/profiles/{{ $.Profile.ID }}/viewers/{{ .ID }}/delete" class="inline-form">
+          <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+          <button type="submit" class="btn btn-danger">Remove</button>
+        </form>
+      </div>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No specific viewers yet.</p>
+  {{ end }}
+
+  <form method="post" action="/profiles/{{ .Profile.ID }}/viewers" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="profile-viewer-user-id">Add viewer</label>
+      <select id="profile-viewer-user-id" name="user_id" class="form-item">
+        <option value="">Select user</option>
+        {{ range .ViewerUsers }}
+        <option value="{{ .ID }}">{{ .DisplayName }}</option>
+        {{ end }}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Add Viewer</button>
+    </div>
+  </form>
+</section>
 {{ end }}
 
 <section class="section-card">

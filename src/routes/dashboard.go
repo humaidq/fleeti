@@ -80,9 +80,74 @@ func FleetsPage(c flamego.Context, s session.Session, t template.Template, data 
 	}
 
 	data["Fleets"] = fleets
-	data["ManageableFleetIDs"] = manageableFleetMap(user, fleets)
 
 	t.HTML(http.StatusOK, "fleets")
+}
+
+// FleetPage renders fleet summary and management actions.
+func FleetPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Fleet Summary")
+	data["IsFleets"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/fleets", FlashError, "Access restricted")
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Param("id"))
+	if fleetID == "" {
+		redirectWithMessage(c, s, "/fleets", FlashError, "Fleet not found")
+
+		return
+	}
+
+	fleet, err := db.GetFleetByID(c.Request().Context(), fleetID)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	canView, err := db.UserCanViewFleet(c.Request().Context(), user.ID.String(), user.IsAdmin, fleetID)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	if !canView {
+		redirectWithMessage(c, s, "/fleets", FlashError, "Access restricted")
+
+		return
+	}
+
+	canManage := canManageFleet(user, fleet)
+
+	data["Fleet"] = fleet
+	data["CanManageFleet"] = canManage
+	setBreadcrumbs(data, fleetBreadcrumbs(fleet))
+
+	if user.IsAdmin {
+		viewerUsers, err := db.ListViewerUsers(c.Request().Context())
+		if err != nil {
+			logger.Error("failed to list users for fleet permissions", "fleet_id", fleetID, "error", err)
+			setPageErrorFlash(data, "Failed to load user permission controls")
+		} else {
+			data["ViewerUsers"] = viewerUsers
+		}
+
+		fleetViewers, err := db.ListFleetViewerUsers(c.Request().Context(), fleetID)
+		if err != nil {
+			logger.Error("failed to list fleet viewers", "fleet_id", fleetID, "error", err)
+			setPageErrorFlash(data, "Failed to load fleet viewers")
+		} else {
+			data["FleetViewers"] = fleetViewers
+		}
+	}
+
+	t.HTML(http.StatusOK, "fleet_view")
 }
 
 // CreateFleet handles fleet creation.
@@ -110,6 +175,58 @@ func CreateFleet(c flamego.Context, s session.Session) {
 	}
 
 	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet created")
+}
+
+// UpdateFleet handles fleet metadata updates.
+func UpdateFleet(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Param("id"))
+	path := fleetViewPath(fleetID)
+	if path == "/fleets/" {
+		path = "/fleets"
+	}
+
+	if fleetID == "" {
+		handleMutationError(c, s, path, db.ErrFleetRequired)
+
+		return
+	}
+
+	fleet, err := db.GetFleetByID(c.Request().Context(), fleetID)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	if !canManageFleet(user, fleet) {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	name := strings.TrimSpace(c.Request().Form.Get("name"))
+	description := strings.TrimSpace(c.Request().Form.Get("description"))
+
+	if err := db.UpdateFleet(c.Request().Context(), fleetID, name, description); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Fleet updated")
 }
 
 // DeleteFleet permanently deletes a fleet and all dependent records.
@@ -165,27 +282,112 @@ func UpdateFleetVisibility(c flamego.Context, s session.Session) {
 		return
 	}
 
-	if err := c.Request().ParseForm(); err != nil {
-		redirectWithMessage(c, s, "/fleets", FlashError, "Failed to parse form")
+	fleetID := strings.TrimSpace(c.Param("id"))
+	path := fleetViewPath(fleetID)
+	if path == "/fleets/" {
+		path = "/fleets"
+	}
+
+	if fleetID == "" {
+		handleMutationError(c, s, path, db.ErrFleetRequired)
 
 		return
 	}
 
-	fleetID := strings.TrimSpace(c.Param("id"))
-	if fleetID == "" {
-		handleMutationError(c, s, "/fleets", db.ErrFleetRequired)
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
 
 		return
 	}
 
 	visibility := strings.TrimSpace(c.Request().Form.Get("visibility"))
 	if err := db.SetFleetVisibility(c.Request().Context(), fleetID, visibility); err != nil {
-		handleMutationError(c, s, "/fleets", err)
+		handleMutationError(c, s, path, err)
 
 		return
 	}
 
-	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet visibility updated")
+	redirectWithMessage(c, s, path, FlashSuccess, "Fleet visibility updated")
+}
+
+// AddFleetViewer grants a user view access to a fleet (admin only).
+func AddFleetViewer(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/fleets", db.ErrAdminRequired)
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Param("id"))
+	path := fleetViewPath(fleetID)
+	if path == "/fleets/" {
+		path = "/fleets"
+	}
+
+	if fleetID == "" {
+		handleMutationError(c, s, path, db.ErrFleetRequired)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	viewerUserID := strings.TrimSpace(c.Request().Form.Get("user_id"))
+	if err := db.GrantFleetViewer(c.Request().Context(), fleetID, viewerUserID, user.ID.String()); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Fleet viewer added")
+}
+
+// RemoveFleetViewer revokes a user's view access to a fleet (admin only).
+func RemoveFleetViewer(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/fleets", db.ErrAdminRequired)
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Param("id"))
+	path := fleetViewPath(fleetID)
+	if path == "/fleets/" {
+		path = "/fleets"
+	}
+
+	if fleetID == "" {
+		handleMutationError(c, s, path, db.ErrFleetRequired)
+
+		return
+	}
+
+	viewerUserID := strings.TrimSpace(c.Param("user_id"))
+	if err := db.RevokeFleetViewer(c.Request().Context(), fleetID, viewerUserID); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Fleet viewer removed")
 }
 
 // ProfilesPage renders the profiles list.
@@ -512,7 +714,14 @@ func ProfilePage(c flamego.Context, s session.Session, t template.Template, data
 		return
 	}
 
-	if !canViewProfile(user, profile) {
+	canView, err := db.UserCanViewProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canView {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
 
 		return
@@ -588,6 +797,25 @@ func EditProfilePage(c flamego.Context, s session.Session, t template.Template, 
 	data["SelectedFleetIDs"] = fleetSelectionMap(profile.FleetIDs)
 	data["ProfileNavActive"] = "settings"
 	data["CanManageProfile"] = true
+
+	if user.IsAdmin {
+		viewerUsers, err := db.ListViewerUsers(c.Request().Context())
+		if err != nil {
+			logger.Error("failed to list users for profile permissions", "profile_id", profileID, "error", err)
+			setPageErrorFlash(data, "Failed to load user permission controls")
+		} else {
+			data["ViewerUsers"] = viewerUsers
+		}
+
+		profileViewers, err := db.ListProfileViewerUsers(c.Request().Context(), profileID)
+		if err != nil {
+			logger.Error("failed to list profile viewers", "profile_id", profileID, "error", err)
+			setPageErrorFlash(data, "Failed to load profile viewers")
+		} else {
+			data["ProfileViewers"] = profileViewers
+		}
+	}
+
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Settings"))
 
 	t.HTML(http.StatusOK, "profile_edit")
@@ -877,6 +1105,76 @@ func UpdateProfileVisibility(c flamego.Context, s session.Session) {
 	}
 
 	redirectWithMessage(c, s, profileEditPath(profileID), FlashSuccess, "Profile visibility updated")
+}
+
+// AddProfileViewer grants a user view access to a profile (admin only).
+func AddProfileViewer(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/profiles", db.ErrAdminRequired)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, profileEditPath(profileID), FlashError, "Failed to parse form")
+
+		return
+	}
+
+	viewerUserID := strings.TrimSpace(c.Request().Form.Get("user_id"))
+	if err := db.GrantProfileViewer(c.Request().Context(), profileID, viewerUserID, user.ID.String()); err != nil {
+		handleMutationError(c, s, profileEditPath(profileID), err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, profileEditPath(profileID), FlashSuccess, "Profile viewer added")
+}
+
+// RemoveProfileViewer revokes a user's view access to a profile (admin only).
+func RemoveProfileViewer(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/profiles", db.ErrAdminRequired)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	viewerUserID := strings.TrimSpace(c.Param("user_id"))
+	if err := db.RevokeProfileViewer(c.Request().Context(), profileID, viewerUserID); err != nil {
+		handleMutationError(c, s, profileEditPath(profileID), err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, profileEditPath(profileID), FlashSuccess, "Profile viewer removed")
 }
 
 // UpdateProfileKernel handles profile kernel updates.
@@ -1599,6 +1897,10 @@ func profileViewPath(profileID string) string {
 	return "/profiles/" + profileID
 }
 
+func fleetViewPath(fleetID string) string {
+	return "/fleets/" + fleetID
+}
+
 func buildViewPath(buildID string) string {
 	return "/builds/" + buildID
 }
@@ -1648,6 +1950,18 @@ func profileSectionBreadcrumbs(profile db.ProfileEdit, section string) []Breadcr
 	}
 
 	return items
+}
+
+func fleetBreadcrumbs(fleet db.Fleet) []BreadcrumbItem {
+	name := strings.TrimSpace(fleet.Name)
+	if name == "" {
+		name = "Fleet"
+	}
+
+	return []BreadcrumbItem{
+		{Name: "Fleets", URL: "/fleets"},
+		{Name: name, IsCurrent: true},
+	}
 }
 
 func buildBreadcrumbs(build db.Build) []BreadcrumbItem {
@@ -2063,6 +2377,8 @@ func mutationErrorMessage(err error) string {
 		return "Access restricted"
 	case errors.Is(err, db.ErrAdminRequired):
 		return "Admin permissions required"
+	case errors.Is(err, db.ErrUserNotFound):
+		return "User not found"
 	case errors.Is(err, db.ErrProfileRequired):
 		return "Profile is required"
 	case errors.Is(err, db.ErrBuildRequired):

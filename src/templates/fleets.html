@@ -27,53 +27,30 @@
 </section>
 
 <section class="section-card">
-  <h3>Fleet Inventory</h3>
+  <h3>Fleet Catalog</h3>
   {{ if .Fleets }}
-  <div class="table-card">
-    <table class="contacts-list">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Description</th>
-          <th>Visibility</th>
-          <th>Created (UTC)</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-      {{ range .Fleets }}
-        <tr>
-          <td><strong>{{ .Name }}</strong></td>
-          <td>{{ if .Description }}{{ .Description }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
-          <td>
-            {{ if $.IsAdmin }}
-            <form method="post" action="/fleets/{{ .ID }}/visibility" class="inline-form">
-              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
-              <select name="visibility" class="form-item">
-                <option value="private"{{ if eq .Visibility "private" }} selected{{ end }}>Private</option>
-                <option value="visible"{{ if eq .Visibility "visible" }} selected{{ end }}>Visible</option>
-              </select>
-              <button type="submit" class="btn">Save</button>
-            </form>
-            {{ else }}
-              {{ if eq .Visibility "visible" }}Visible{{ else }}Private{{ end }}
+  <div class="list-card-list">
+    {{ range .Fleets }}
+    <div class="list-card list-card-clickable fleet-list-card">
+      <a href="/fleets/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-server"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .Name }}</div>
+            <div class="list-card-meta fleet-list-meta">
+              <span class="muted-text">Visibility: {{ if eq .Visibility "visible" }}visible{{ else }}private{{ end }}</span>
+              <span class="muted-text">Created (UTC): {{ .CreatedAt }}</span>
+            </div>
+            {{ if .Description }}
+            <p class="muted-text fleet-list-description">{{ .Description }}</p>
             {{ end }}
-          </td>
-          <td>{{ .CreatedAt }}</td>
-          <td>
-            {{ if index $.ManageableFleetIDs .ID }}
-            <form method="post" action="/fleets/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this fleet and all associated data? This cannot be undone.');">
-              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
-              <button type="submit" class="btn btn-danger">Delete Permanently</button>
-            </form>
-            {{ else }}
-            <span class="muted-text">No actions</span>
-            {{ end }}
-          </td>
-        </tr>
-      {{ end }}
-      </tbody>
-    </table>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
   </div>
   {{ else }}
   <p class="muted-text">No fleets yet.</p>

@@ -20,8 +20,56 @@ import SiteTitle from 'virtual:starlight/components/SiteTitle';
 
 	<div class="header-actions">
 		<a class="login-btn" href="https://admin.fleeti.ae">Log in</a>
+		<fleeti-menu-toggle>
+			<button
+				type="button"
+				class="hamburger-btn"
+				aria-expanded="false"
+				aria-label="Toggle navigation menu"
+			>
+				<span class="bar"></span>
+				<span class="bar"></span>
+				<span class="bar"></span>
+			</button>
+		</fleeti-menu-toggle>
 	</div>
 </div>
+
+<div class="mobile-nav-drawer" hidden>
+	<nav aria-label="Mobile navigation">
+		<a href="/" aria-current={Astro.url.pathname === '/' ? 'page' : undefined}>Docs</a>
+		<a href="/overview/" aria-current={Astro.url.pathname === '/overview/' ? 'page' : undefined}>Overview</a>
+		<a
+			href="/guides/example/"
+			aria-current={Astro.url.pathname.startsWith('/guides/') ? 'page' : undefined}>Guides</a
+		>
+	</nav>
+</div>
+
+<script>
+	class FleetiMenuToggle extends HTMLElement {
+		constructor() {
+			super();
+			const btn = this.querySelector('button');
+			const drawer = document.querySelector('.mobile-nav-drawer');
+			if (!btn || !drawer) return;
+
+			btn.addEventListener('click', () => {
+				const expanded = btn.getAttribute('aria-expanded') === 'true';
+				btn.setAttribute('aria-expanded', String(!expanded));
+				drawer.hidden = expanded;
+			});
+
+			document.addEventListener('keydown', (e) => {
+				if (e.key === 'Escape' && btn.getAttribute('aria-expanded') === 'true') {
+					btn.setAttribute('aria-expanded', 'false');
+					drawer.hidden = true;
+				}
+			});
+		}
+	}
+	customElements.define('fleeti-menu-toggle', FleetiMenuToggle);
+</script>
 
 <style>
 	@layer starlight.core {
@@ -71,6 +119,8 @@ import SiteTitle from 'virtual:starlight/components/SiteTitle';
 
 		.header-actions {
 			display: inline-flex;
+			align-items: center;
+			gap: 0.5rem;
 			justify-content: flex-end;
 		}
 
@@ -88,19 +138,135 @@ import SiteTitle from 'virtual:starlight/components/SiteTitle';
 			font-weight: 600;
 			line-height: 1;
 			text-decoration: none;
-			box-shadow: 0 8px 18px -14px rgba(9, 54, 83, 0.7);
-			transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+			transition: transform 160ms ease, background-color 160ms ease;
 		}
 
 		.login-btn:hover {
 			background: #f0f8fd;
 			transform: translateY(-1px);
-			box-shadow: 0 12px 20px -13px rgba(9, 54, 83, 0.7);
 		}
 
+		/* Hamburger button */
+		fleeti-menu-toggle {
+			display: contents;
+		}
+
+		.hamburger-btn {
+			display: none;
+			flex-direction: column;
+			justify-content: center;
+			align-items: center;
+			gap: 4px;
+			width: 2.4rem;
+			height: 2.4rem;
+			padding: 0;
+			border-radius: 0.55rem;
+			border: 1px solid #d3e3ef;
+			background: #ffffff;
+			cursor: pointer;
+			transition: background-color 160ms ease;
+		}
+
+		.hamburger-btn:hover {
+			background: #f0f8fd;
+		}
+
+		.hamburger-btn .bar {
+			display: block;
+			width: 16px;
+			height: 2px;
+			background: #0f5f8f;
+			border-radius: 1px;
+			transition: transform 200ms ease, opacity 200ms ease;
+		}
+
+		.hamburger-btn[aria-expanded='true'] .bar:nth-child(1) {
+			transform: translateY(6px) rotate(45deg);
+		}
+
+		.hamburger-btn[aria-expanded='true'] .bar:nth-child(2) {
+			opacity: 0;
+		}
+
+		.hamburger-btn[aria-expanded='true'] .bar:nth-child(3) {
+			transform: translateY(-6px) rotate(-45deg);
+		}
+
+		/* Mobile nav drawer */
+		.mobile-nav-drawer {
+			position: fixed;
+			top: var(--sl-nav-height);
+			left: 0;
+			right: 0;
+			z-index: 10;
+			padding: 1rem;
+			background: rgba(246, 248, 252, 0.92);
+			backdrop-filter: blur(12px);
+			border-bottom: 1px solid #d7e2f0;
+			animation: drawer-slide 200ms ease;
+		}
+
+		.mobile-nav-drawer[hidden] {
+			display: none;
+		}
+
+		.mobile-nav-drawer nav {
+			display: flex;
+			flex-direction: column;
+			gap: 0.25rem;
+		}
+
+		.mobile-nav-drawer nav a {
+			display: flex;
+			align-items: center;
+			height: 2.6rem;
+			padding: 0 0.9rem;
+			border-radius: 0.55rem;
+			border: 1px solid transparent;
+			font-size: 1rem;
+			font-weight: 600;
+			color: #35557a;
+			text-decoration: none;
+			transition: background-color 180ms ease, color 180ms ease;
+		}
+
+		.mobile-nav-drawer nav a:hover {
+			background: #eaf2f9;
+			color: #0f5f8f;
+		}
+
+		.mobile-nav-drawer nav a[aria-current='page'] {
+			background: #ffffff;
+			border-color: #d3e3ef;
+			color: #0f5f8f;
+		}
+
+		@keyframes drawer-slide {
+			from {
+				opacity: 0;
+				transform: translateY(-8px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+
+		/* Mobile: show hamburger */
+		@media (max-width: 49.999rem) {
+			.hamburger-btn {
+				display: flex;
+			}
+		}
+
+		/* Desktop: show nav, hide drawer */
 		@media (min-width: 50rem) {
 			.main-nav {
 				display: inline-flex;
+			}
+
+			.mobile-nav-drawer {
+				display: none !important;
 			}
 		}
 

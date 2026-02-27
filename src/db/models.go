@@ -333,6 +333,41 @@ func CreateFleet(ctx context.Context, name, description, ownerUserID string) err
 	return nil
 }
 
+func GetFleetByID(ctx context.Context, fleetID string) (Fleet, error) {
+	p := GetPool()
+	if p == nil {
+		return Fleet{}, ErrDatabaseConnectionNotInitialized
+	}
+
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return Fleet{}, ErrFleetRequired
+	}
+
+	var item Fleet
+
+	err := p.QueryRow(ctx, `
+		SELECT
+			id::text,
+			name,
+			description,
+			COALESCE(owner_user_id::text, ''),
+			visibility,
+			to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+		FROM fleets
+		WHERE id::text = $1
+	`, fleetID).Scan(&item.ID, &item.Name, &item.Description, &item.OwnerUserID, &item.Visibility, &item.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Fleet{}, ErrFleetNotFound
+	}
+
+	if err != nil {
+		return Fleet{}, fmt.Errorf("failed to load fleet: %w", err)
+	}
+
+	return item, nil
+}
+
 func ListFleetsForUser(ctx context.Context, userID string, isAdmin bool) ([]Fleet, error) {
 	if isAdmin {
 		return ListFleets(ctx)
@@ -356,6 +391,12 @@ func ListFleetsForUser(ctx context.Context, userID string, isAdmin bool) ([]Flee
 		FROM fleets
 		WHERE owner_user_id::text = $1
 		   OR visibility = $2
+		   OR EXISTS (
+			SELECT 1
+			FROM fleet_user_permissions fup
+			WHERE fup.fleet_id = fleets.id
+			  AND fup.user_id::text = $1
+		)
 		ORDER BY created_at DESC, name ASC
 	`, userID, VisibilityVisible)
 	if err != nil {
@@ -400,7 +441,17 @@ func UserCanViewFleet(ctx context.Context, userID string, isAdmin bool, fleetID 
 			SELECT 1
 			FROM fleets
 			WHERE id::text = $1
-			  AND ($2 OR owner_user_id::text = $3 OR visibility = $4)
+			  AND (
+				$2
+				OR owner_user_id::text = $3
+				OR visibility = $4
+				OR EXISTS (
+					SELECT 1
+					FROM fleet_user_permissions fup
+					WHERE fup.fleet_id = fleets.id
+					  AND fup.user_id::text = $3
+				)
+			  )
 		)
 	`, fleetID, isAdmin, userID, VisibilityVisible).Scan(&canView)
 	if err != nil {
@@ -461,6 +512,45 @@ func SetFleetVisibility(ctx context.Context, fleetID, visibility string) error {
 	`, fleetID, normalizedVisibility)
 	if err != nil {
 		return fmt.Errorf("failed to update fleet visibility: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrFleetNotFound
+	}
+
+	return nil
+}
+
+func UpdateFleet(ctx context.Context, fleetID, name, description string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	fleetID = strings.TrimSpace(fleetID)
+	name = strings.TrimSpace(name)
+	description = strings.TrimSpace(description)
+
+	if fleetID == "" {
+		return ErrFleetRequired
+	}
+
+	if name == "" {
+		return ErrNameRequired
+	}
+
+	result, err := p.Exec(ctx, `
+		UPDATE fleets
+		SET name = $2,
+			description = $3
+		WHERE id::text = $1
+	`, fleetID, name, description)
+	if uniqueViolation(err) {
+		return ErrFleetAlreadyExists
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to update fleet: %w", err)
 	}
 
 	if result.RowsAffected() == 0 {
@@ -608,6 +698,12 @@ func ListProfilesForUser(ctx context.Context, userID string, isAdmin bool) ([]Pr
 		) pr ON true
 		WHERE p.owner_user_id::text = $1
 		   OR p.visibility = $2
+		   OR EXISTS (
+			SELECT 1
+			FROM profile_user_permissions pup
+			WHERE pup.profile_id = p.id
+			  AND pup.user_id::text = $1
+		)
 		GROUP BY p.id, p.name, p.description, p.owner_user_id, p.visibility, pr.revision, pr.config_hash, p.created_at
 		ORDER BY p.created_at DESC, p.name ASC
 	`, userID, VisibilityVisible)
@@ -670,7 +766,17 @@ func UserCanViewProfile(ctx context.Context, userID string, isAdmin bool, profil
 			SELECT 1
 			FROM profiles
 			WHERE id::text = $1
-			  AND ($2 OR owner_user_id::text = $3 OR visibility = $4)
+			  AND (
+				$2
+				OR owner_user_id::text = $3
+				OR visibility = $4
+				OR EXISTS (
+					SELECT 1
+					FROM profile_user_permissions pup
+					WHERE pup.profile_id = profiles.id
+					  AND pup.user_id::text = $3
+				)
+			  )
 		)
 	`, profileID, isAdmin, userID, VisibilityVisible).Scan(&canView)
 	if err != nil {

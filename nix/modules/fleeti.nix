@@ -85,6 +85,8 @@ in
 
         Environment = [
           "DATABASE_URL=postgres:///fleeti"
+          "HOME=/var/lib/fleeti"
+          "XDG_CACHE_HOME=/var/lib/fleeti/.cache"
         ];
       };
 

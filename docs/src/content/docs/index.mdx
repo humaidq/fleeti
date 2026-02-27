@@ -19,21 +19,19 @@ hero:
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Start with docs
+## Why Fleeti
 
 <CardGrid stagger>
-	<Card title="Project overview" icon="open-book">
-		Read the [Fleeti overview](/overview/) for scope and core concepts.
+	<Card title="Declarative configuration" icon="setting">
+		Define packages, services, users, and security policies for your fleet through an easy-to-use web interface.
 	</Card>
-	<Card title="Run locally" icon="pencil">
-		Follow the [quickstart guide](/guides/example/) to run migrations and start
-		the web app.
+	<Card title="Reproducible builds" icon="puzzle">
+		Nix-powered build pipeline produces deterministic, versioned images every time. Same config, same output.
 	</Card>
-	<Card title="Use the CLI" icon="setting">
-		Use the [runtime reference](/reference/example/) for command and environment
-		variable details.
+	<Card title="Secure by design" icon="approve-check-circle">
+		Signed OTA updates, verified boot chain from UEFI to root filesystem, and unique Secure Boot keys per device.
 	</Card>
-	<Card title="Source code" icon="external">
-		Browse [github.com/humaidq/fleeti](https://github.com/humaidq/fleeti).
+	<Card title="Fleet-scale rollouts" icon="rocket">
+		Staged rollouts with per-device tracking, rollback support, and real-time observability across your entire fleet.
 	</Card>
 </CardGrid>

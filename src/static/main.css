@@ -459,10 +459,28 @@ label {
   padding: 0.9rem;
 }
 
+.list-card-clickable {
+  padding: 0;
+}
+
 .list-card-link {
   text-decoration: none;
   color: inherit;
   display: block;
+}
+
+.list-card-clickable .list-card-link {
+  padding: 0.9rem;
+  border-radius: inherit;
+}
+
+.list-card-clickable .list-card-link:focus {
+  outline: none;
+}
+
+.list-card-clickable:focus-within {
+  outline: 0.2rem solid #ffbf47;
+  outline-offset: 2px;
 }
 
 .list-card-entry {
@@ -537,6 +555,19 @@ label {
 }
 
 .profile-list-description {
+  margin-top: 0.6rem;
+}
+
+.fleet-list-card {
+  border-color: #ccd8e7;
+  background-color: #f7fbff;
+}
+
+.fleet-list-meta {
+  gap: 0.25rem;
+}
+
+.fleet-list-description {
   margin-top: 0.6rem;
 }
 

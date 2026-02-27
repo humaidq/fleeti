@@ -50,7 +50,7 @@
   {{ if .Builds }}
   <div class="list-card-list">
     {{ range .Builds }}
-    <div class="list-card build-list-card">
+    <div class="list-card list-card-clickable build-list-card">
       <a href="/builds/{{ .ID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">

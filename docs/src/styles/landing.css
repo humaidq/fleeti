@@ -39,7 +39,7 @@
 		--sl-color-hairline-shade: #0a476a;
 
 		--sl-shadow-sm: 0 1px 2px rgba(19, 32, 64, 0.06);
-		--sl-shadow-md: 0 10px 26px -20px rgba(21, 78, 113, 0.35);
+		--sl-shadow-md: 0 4px 12px -8px rgba(21, 78, 113, 0.15);
 	}
 }
 
@@ -89,7 +89,7 @@
 		border: 1px solid #d5e1ee;
 		border-radius: 1rem;
 		background: #ffffff;
-		box-shadow: 0 20px 40px -34px rgba(10, 71, 106, 0.44);
+		box-shadow: 0 2px 8px -4px rgba(10, 71, 106, 0.12);
 		animation: card-rise 480ms ease both;
 	}
 

@@ -44,7 +44,7 @@
   {{ if .Releases }}
   <div class="list-card-list">
     {{ range .Releases }}
-    <div class="list-card release-list-card">
+    <div class="list-card list-card-clickable release-list-card">
       <a href="/releases/{{ .ID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
