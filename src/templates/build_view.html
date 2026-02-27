@@ -16,12 +16,14 @@
 <div class="page-header">
   <h2>Build Details</h2>
   <div class="page-header-actions">
-    <form method="post" action="/builds/{{ .Build.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this build and all associated releases and rollouts? This cannot be undone.');">
+    {{ if .CanManageBuild }}
+    <form method="post" action="{{ if .BuildDeletePath }}{{ .BuildDeletePath }}{{ else }}/builds/{{ .Build.ID }}/delete{{ end }}" class="inline-form" onsubmit="return confirm('Permanently delete this build and all associated releases and rollouts? This cannot be undone.');">
       <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn btn-danger">Delete Permanently</button>
     </form>
+    {{ end }}
     <a href="/builds/{{ .Build.ID }}/logs" class="btn">{{ if eq .Build.Status "running" }}Live Log{{ else }}View Log{{ end }}</a>
-    <a href="/builds" class="btn">Back to Builds</a>
+    <a href="{{ if .BuildBackPath }}{{ .BuildBackPath }}{{ else }}/builds{{ end }}" class="btn">Back to Builds</a>
   </div>
 </div>
 
@@ -65,6 +67,7 @@
     {{ end }}
   </div>
 
+  {{ if .CanManageBuild }}
   {{ if and (eq .Build.Status "succeeded") (ne .Build.InstallerStatus "queued") (ne .Build.InstallerStatus "running") (ne .Build.InstallerStatus "succeeded") }}
   <form method="post" action="/builds/{{ .Build.ID }}/installer" class="inline-form">
     <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
@@ -72,6 +75,7 @@
   </form>
   {{ else if or (eq .Build.InstallerStatus "queued") (eq .Build.InstallerStatus "running") }}
   <p class="muted-text">Installer build is in progress.</p>
+  {{ end }}
   {{ end }}
 </section>
 

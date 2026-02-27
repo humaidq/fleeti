@@ -1133,6 +1133,84 @@ func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template
 	t.HTML(http.StatusOK, "profile_raw_nix")
 }
 
+// ProfileDeploymentsPage renders build/release/rollout workflows for a profile.
+func ProfileDeploymentsPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Profile Deployments")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	builds := []db.Build{}
+	allBuilds, err := db.ListBuilds(c.Request().Context())
+	if err != nil {
+		logger.Error("failed to list builds for profile deployments", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to load profile builds")
+	} else {
+		builds = filterBuildsByProfileID(allBuilds, profile.ID)
+	}
+
+	buildIDs := buildIDSet(builds)
+
+	releases := []db.Release{}
+	allReleases, err := db.ListReleases(c.Request().Context())
+	if err != nil {
+		logger.Error("failed to list releases for profile deployments", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to load profile releases")
+	} else {
+		releases = filterReleasesByBuildIDs(allReleases, buildIDs)
+	}
+
+	releaseIDs := releaseIDSet(releases)
+
+	rollouts := []db.Rollout{}
+	allRollouts, err := db.ListRollouts(c.Request().Context())
+	if err != nil {
+		logger.Error("failed to list rollouts for profile deployments", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to load profile rollouts")
+	} else {
+		rollouts = filterRolloutsByReleaseIDs(allRollouts, releaseIDs)
+	}
+
+	fleets := []db.Fleet{}
+	allFleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
+	if err != nil {
+		logger.Error("failed to list fleets for profile deployments", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to load profile fleets")
+	} else {
+		fleets = fleetsAssignedToProfile(profile, manageableFleetsForUser(user, allFleets))
+	}
+
+	data["Profile"] = profile
+	data["CanManageProfile"] = canManage
+	data["ProfileNavActive"] = "deployments"
+	data["ProfileBuilds"] = builds
+	data["ProfileReleases"] = releases
+	data["ProfileRollouts"] = rollouts
+	data["DeploymentFleets"] = fleets
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Deployments"))
+
+	t.HTML(http.StatusOK, "profile_deployments")
+}
+
 // UpdateProfile handles profile settings updates.
 func UpdateProfile(c flamego.Context, s session.Session) {
 	user, err := resolveSessionUser(c.Request().Context(), s)
@@ -1547,6 +1625,664 @@ func DeleteProfile(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/profiles", FlashSuccess, "Profile permanently deleted")
 }
 
+// ProfileBuildPage renders details for a profile-scoped build.
+func ProfileBuildPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Build Details")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	buildID := strings.TrimSpace(c.Param("build_id"))
+	path := profileDeploymentsBuildsPath(profileID)
+	if buildID == "" {
+		redirectWithMessage(c, s, path, FlashError, "Build not found")
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), buildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Build not found")
+
+		return
+	}
+
+	updateArtifactLinks, err := listBuildUpdateArtifactLinks(build.ID)
+	if err != nil {
+		logger.Warn("failed to list profile build update artifacts", "profile_id", profileID, "build_id", build.ID, "error", err)
+		setPageErrorFlash(data, "Failed to load update artifacts")
+		updateArtifactLinks = []BuildArtifactLink{}
+	}
+
+	installerArtifactLinks, err := listBuildInstallerArtifactLinks(build.ID)
+	if err != nil {
+		logger.Warn("failed to list profile build installer artifacts", "profile_id", profileID, "build_id", build.ID, "error", err)
+		setPageErrorFlash(data, "Failed to load installer artifacts")
+		installerArtifactLinks = []BuildArtifactLink{}
+	}
+
+	buildName := strings.TrimSpace(build.Version)
+	if buildName == "" {
+		buildName = "Build"
+	}
+
+	data["Build"] = build
+	data["CanManageBuild"] = canManage
+	data["BuildBackPath"] = path
+	data["BuildDeletePath"] = profileBuildDeletePath(profileID, buildID)
+	data["UpdateArtifactLinks"] = updateArtifactLinks
+	data["InstallerArtifactLinks"] = installerArtifactLinks
+	setBreadcrumbs(data, profileDeploymentsBreadcrumbs(profile, buildName))
+
+	t.HTML(http.StatusOK, "build_view")
+}
+
+// CreateProfileBuild handles profile-scoped build creation.
+func CreateProfileBuild(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsBuildsPath(profileID)
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Request().Form.Get("fleet_id"))
+	if err := ensureUserCanManageFleetIDs(c.Request().Context(), user, []string{fleetID}); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	input := db.CreateBuildInput{
+		ProfileID: profile.ID,
+		FleetID:   fleetID,
+		Version:   strings.TrimSpace(c.Request().Form.Get("version")),
+	}
+
+	buildID, err := db.CreateBuild(c.Request().Context(), input)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	queueBuildExecution(buildID, input.Version)
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Build queued")
+}
+
+// DeleteProfileBuild permanently deletes a profile-scoped build.
+func DeleteProfileBuild(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsBuildsPath(profileID)
+	buildID := strings.TrimSpace(c.Param("build_id"))
+	if buildID == "" {
+		handleMutationError(c, s, path, db.ErrBuildRequired)
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), buildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Build not found")
+
+		return
+	}
+
+	if err := deleteBuildCascade(c.Request().Context(), buildID); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Build permanently deleted")
+}
+
+// ProfileReleasePage renders details for a profile-scoped release.
+func ProfileReleasePage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Release Summary")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	releaseID := strings.TrimSpace(c.Param("release_id"))
+	path := profileDeploymentsReleasesPath(profileID)
+	if releaseID == "" {
+		redirectWithMessage(c, s, path, FlashError, "Release not found")
+
+		return
+	}
+
+	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Release not found")
+
+		return
+	}
+
+	rollouts, err := db.ListRollouts(c.Request().Context())
+	if err != nil {
+		logger.Error("failed to list rollouts for profile release summary", "profile_id", profileID, "release_id", releaseID, "error", err)
+		setPageErrorFlash(data, "Failed to load release rollouts")
+		rollouts = []db.Rollout{}
+	}
+
+	relatedRollouts := make([]db.Rollout, 0)
+	for _, rollout := range rollouts {
+		if rollout.ReleaseID != release.ID {
+			continue
+		}
+
+		relatedRollouts = append(relatedRollouts, rollout)
+	}
+
+	releaseName := strings.TrimSpace(release.Version)
+	if releaseName == "" {
+		releaseName = "Release"
+	}
+
+	data["Release"] = release
+	data["RelatedRollouts"] = relatedRollouts
+	data["CanManageRelease"] = canManage
+	data["ReleaseDeletePath"] = profileReleaseDeletePath(profileID, releaseID)
+	data["ReleaseBackPath"] = path
+	data["ReleaseRolloutsPath"] = profileDeploymentsRolloutsPath(profileID)
+	data["ReleaseBuildPath"] = profileBuildPath(profileID, release.BuildID)
+	data["ReleaseRolloutPathPrefix"] = profileRolloutsPathPrefix(profileID)
+	setBreadcrumbs(data, profileDeploymentsBreadcrumbs(profile, releaseName))
+
+	t.HTML(http.StatusOK, "release_view")
+}
+
+// CreateProfileRelease handles profile-scoped release creation.
+func CreateProfileRelease(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsReleasesPath(profileID)
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	input := db.CreateReleaseInput{
+		BuildID: strings.TrimSpace(c.Request().Form.Get("build_id")),
+		Channel: strings.TrimSpace(c.Request().Form.Get("channel")),
+		Version: strings.TrimSpace(c.Request().Form.Get("version")),
+		Notes:   strings.TrimSpace(c.Request().Form.Get("notes")),
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), input.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Build not found")
+
+		return
+	}
+
+	if input.Version == "" {
+		input.Version = build.Version
+	}
+
+	if err := db.CreateRelease(c.Request().Context(), input); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Release created")
+}
+
+// DeleteProfileRelease permanently deletes a profile-scoped release.
+func DeleteProfileRelease(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsReleasesPath(profileID)
+	releaseID := strings.TrimSpace(c.Param("release_id"))
+	if releaseID == "" {
+		handleMutationError(c, s, path, db.ErrReleaseRequired)
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Release not found")
+
+		return
+	}
+
+	if err := deleteReleaseCascade(c.Request().Context(), releaseID); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Release permanently deleted")
+}
+
+// ProfileRolloutPage renders details for a profile-scoped rollout.
+func ProfileRolloutPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Rollout Summary")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	rolloutID := strings.TrimSpace(c.Param("rollout_id"))
+	path := profileDeploymentsRolloutsPath(profileID)
+	if rolloutID == "" {
+		redirectWithMessage(c, s, path, FlashError, "Rollout not found")
+
+		return
+	}
+
+	rollout, err := db.GetRolloutByID(c.Request().Context(), rolloutID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	release, err := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Rollout not found")
+
+		return
+	}
+
+	rolloutName := strings.TrimSpace(rollout.ReleaseVersion)
+	if rolloutName == "" {
+		rolloutName = strings.TrimSpace(rollout.ID)
+	}
+
+	if rolloutName == "" {
+		rolloutName = "Rollout"
+	}
+
+	data["Rollout"] = rollout
+	data["Release"] = release
+	data["HasRelease"] = true
+	data["CanManageRollout"] = canManage
+	data["RolloutDeletePath"] = profileRolloutDeletePath(profileID, rolloutID)
+	data["RolloutBackPath"] = path
+	data["RolloutReleasePath"] = profileReleasePath(profileID, rollout.ReleaseID)
+	data["RolloutReleasesPath"] = profileDeploymentsReleasesPath(profileID)
+	setBreadcrumbs(data, profileDeploymentsBreadcrumbs(profile, rolloutName))
+
+	t.HTML(http.StatusOK, "rollout_view")
+}
+
+// CreateProfileRollout handles profile-scoped rollout creation.
+func CreateProfileRollout(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsRolloutsPath(profileID)
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Request().Form.Get("fleet_id"))
+	releaseID := strings.TrimSpace(c.Request().Form.Get("release_id"))
+	if err := ensureUserCanManageFleetIDs(c.Request().Context(), user, []string{fleetID}); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Release not found")
+
+		return
+	}
+
+	if err := createAndActivateRollout(c.Request().Context(), fleetID, releaseID); err != nil {
+		if errors.Is(err, errRolloutArtifactActivationFailed) {
+			redirectWithMessage(c, s, path, FlashError, "Failed to activate rollout artifacts")
+
+			return
+		}
+
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Rollout created and activated")
+}
+
+// DeleteProfileRollout permanently deletes a profile-scoped rollout.
+func DeleteProfileRollout(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	path := profileDeploymentsRolloutsPath(profileID)
+	rolloutID := strings.TrimSpace(c.Param("rollout_id"))
+	if rolloutID == "" {
+		handleMutationError(c, s, path, db.ErrRolloutNotFound)
+
+		return
+	}
+
+	profile, canManage, err := resolveProfileAccessContext(c.Request().Context(), user, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, path, db.ErrAccessDenied)
+
+		return
+	}
+
+	rollout, err := db.GetRolloutByID(c.Request().Context(), rolloutID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	release, err := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) != profile.ID {
+		redirectWithMessage(c, s, path, FlashError, "Rollout not found")
+
+		return
+	}
+
+	if err := db.DeleteRollout(c.Request().Context(), rolloutID); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, "Rollout permanently deleted")
+}
+
 // BuildsPage renders builds list and create form.
 func BuildsPage(c flamego.Context, t template.Template, data template.Data) {
 	setPage(data, "Builds")
@@ -1583,10 +2319,7 @@ func BuildsPage(c flamego.Context, t template.Template, data template.Data) {
 }
 
 // BuildPage renders details for a single build.
-func BuildPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
-	setPage(data, "Build Details")
-	data["IsBuilds"] = true
-
+func BuildPage(c flamego.Context, s session.Session, _ template.Template, _ template.Data) {
 	buildID := strings.TrimSpace(c.Param("id"))
 	if buildID == "" {
 		redirectWithMessage(c, s, "/builds", FlashError, "Build not found")
@@ -1601,26 +2334,13 @@ func BuildPage(c flamego.Context, s session.Session, t template.Template, data t
 		return
 	}
 
-	updateArtifactLinks, err := listBuildUpdateArtifactLinks(build.ID)
-	if err != nil {
-		logger.Warn("failed to list build update artifacts", "build_id", build.ID, "error", err)
-		setPageErrorFlash(data, "Failed to load update artifacts")
-		updateArtifactLinks = []BuildArtifactLink{}
+	if strings.TrimSpace(build.ProfileID) == "" {
+		handleMutationError(c, s, "/builds", db.ErrProfileRequired)
+
+		return
 	}
 
-	installerArtifactLinks, err := listBuildInstallerArtifactLinks(build.ID)
-	if err != nil {
-		logger.Warn("failed to list build installer artifacts", "build_id", build.ID, "error", err)
-		setPageErrorFlash(data, "Failed to load installer artifacts")
-		installerArtifactLinks = []BuildArtifactLink{}
-	}
-
-	data["Build"] = build
-	data["UpdateArtifactLinks"] = updateArtifactLinks
-	data["InstallerArtifactLinks"] = installerArtifactLinks
-	setBreadcrumbs(data, buildBreadcrumbs(build))
-
-	t.HTML(http.StatusOK, "build_view")
+	c.Redirect(profileBuildPath(build.ProfileID, build.ID), http.StatusSeeOther)
 }
 
 // CreateBuild handles build creation.
@@ -1646,7 +2366,7 @@ func CreateBuild(c flamego.Context, s session.Session) {
 
 	queueBuildExecution(buildID, input.Version)
 
-	redirectWithMessage(c, s, "/builds", FlashSuccess, "Build queued")
+	redirectWithMessage(c, s, profileDeploymentsBuildsPath(input.ProfileID), FlashSuccess, "Build queued")
 }
 
 // CreateBuildInstaller handles installer image generation for a build.
@@ -1683,8 +2403,20 @@ func DeleteBuild(c flamego.Context, s session.Session) {
 		return
 	}
 
+	profileID := ""
+	build, err := db.GetBuildByID(c.Request().Context(), buildID)
+	if err == nil {
+		profileID = strings.TrimSpace(build.ProfileID)
+	}
+
 	if err := deleteBuildCascade(c.Request().Context(), buildID); err != nil {
 		handleMutationError(c, s, "/builds", err)
+
+		return
+	}
+
+	if profileID != "" {
+		redirectWithMessage(c, s, profileDeploymentsBuildsPath(profileID), FlashSuccess, "Build permanently deleted")
 
 		return
 	}
@@ -1719,10 +2451,7 @@ func ReleasesPage(c flamego.Context, t template.Template, data template.Data) {
 }
 
 // ReleasePage renders release summary.
-func ReleasePage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
-	setPage(data, "Release Summary")
-	data["IsReleases"] = true
-
+func ReleasePage(c flamego.Context, s session.Session, _ template.Template, _ template.Data) {
 	releaseID := strings.TrimSpace(c.Param("id"))
 	if releaseID == "" {
 		redirectWithMessage(c, s, "/releases", FlashError, "Release not found")
@@ -1737,27 +2466,20 @@ func ReleasePage(c flamego.Context, s session.Session, t template.Template, data
 		return
 	}
 
-	rollouts, err := db.ListRollouts(c.Request().Context())
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
 	if err != nil {
-		logger.Error("failed to list rollouts for release summary", "release_id", releaseID, "error", err)
-		setPageErrorFlash(data, "Failed to load release rollouts")
-		rollouts = []db.Rollout{}
+		handleMutationError(c, s, "/releases", err)
+
+		return
 	}
 
-	relatedRollouts := make([]db.Rollout, 0)
-	for _, rollout := range rollouts {
-		if rollout.ReleaseID != release.ID {
-			continue
-		}
+	if strings.TrimSpace(build.ProfileID) == "" {
+		handleMutationError(c, s, "/releases", db.ErrProfileRequired)
 
-		relatedRollouts = append(relatedRollouts, rollout)
+		return
 	}
 
-	data["Release"] = release
-	data["RelatedRollouts"] = relatedRollouts
-	setBreadcrumbs(data, releaseBreadcrumbs(release))
-
-	t.HTML(http.StatusOK, "release_view")
+	c.Redirect(profileReleasePath(build.ProfileID, release.ID), http.StatusSeeOther)
 }
 
 // CreateRelease handles release creation.
@@ -1792,7 +2514,15 @@ func CreateRelease(c flamego.Context, s session.Session) {
 		return
 	}
 
-	redirectWithMessage(c, s, "/releases", FlashSuccess, "Release created")
+	build, err := db.GetBuildByID(c.Request().Context(), input.BuildID)
+	if err != nil {
+		logger.Warn("release created but failed to load build for redirect", "build_id", input.BuildID, "error", err)
+		redirectWithMessage(c, s, "/releases", FlashSuccess, "Release created")
+
+		return
+	}
+
+	redirectWithMessage(c, s, profileDeploymentsReleasesPath(build.ProfileID), FlashSuccess, "Release created")
 }
 
 // WithdrawRelease marks a release as withdrawn and removes active fleet artifacts when needed.
@@ -1846,8 +2576,23 @@ func DeleteRelease(c flamego.Context, s session.Session) {
 		return
 	}
 
+	profileID := ""
+	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
+	if err == nil {
+		build, buildErr := db.GetBuildByID(c.Request().Context(), release.BuildID)
+		if buildErr == nil {
+			profileID = strings.TrimSpace(build.ProfileID)
+		}
+	}
+
 	if err := deleteReleaseCascade(c.Request().Context(), releaseID); err != nil {
 		handleMutationError(c, s, "/releases", err)
+
+		return
+	}
+
+	if profileID != "" {
+		redirectWithMessage(c, s, profileDeploymentsReleasesPath(profileID), FlashSuccess, "Release permanently deleted")
 
 		return
 	}
@@ -1942,10 +2687,7 @@ func RolloutsPage(c flamego.Context, t template.Template, data template.Data) {
 }
 
 // RolloutPage renders rollout summary.
-func RolloutPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
-	setPage(data, "Rollout Summary")
-	data["IsRollouts"] = true
-
+func RolloutPage(c flamego.Context, s session.Session, _ template.Template, _ template.Data) {
 	rolloutID := strings.TrimSpace(c.Param("id"))
 	if rolloutID == "" {
 		redirectWithMessage(c, s, "/rollouts", FlashError, "Rollout not found")
@@ -1962,17 +2704,25 @@ func RolloutPage(c flamego.Context, s session.Session, t template.Template, data
 
 	release, err := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
 	if err != nil {
-		logger.Error("failed to load release for rollout summary", "rollout_id", rolloutID, "release_id", rollout.ReleaseID, "error", err)
-		setPageErrorFlash(data, "Failed to load linked release")
-	} else {
-		data["Release"] = release
-		data["HasRelease"] = true
+		handleMutationError(c, s, "/rollouts", err)
+
+		return
 	}
 
-	data["Rollout"] = rollout
-	setBreadcrumbs(data, rolloutBreadcrumbs(rollout))
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		handleMutationError(c, s, "/rollouts", err)
 
-	t.HTML(http.StatusOK, "rollout_view")
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) == "" {
+		handleMutationError(c, s, "/rollouts", db.ErrProfileRequired)
+
+		return
+	}
+
+	c.Redirect(profileRolloutPath(build.ProfileID, rollout.ID), http.StatusSeeOther)
 }
 
 // CreateRollout handles rollout creation.
@@ -2003,7 +2753,29 @@ func CreateRollout(c flamego.Context, s session.Session) {
 		return
 	}
 
-	redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
+	if err != nil {
+		logger.Warn("rollout created but failed to load release for redirect", "release_id", releaseID, "error", err)
+		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+
+		return
+	}
+
+	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
+	if err != nil {
+		logger.Warn("rollout created but failed to load build for redirect", "release_id", releaseID, "build_id", release.BuildID, "error", err)
+		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+
+		return
+	}
+
+	if strings.TrimSpace(build.ProfileID) == "" {
+		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+
+		return
+	}
+
+	redirectWithMessage(c, s, profileDeploymentsRolloutsPath(build.ProfileID), FlashSuccess, "Rollout created and activated")
 }
 
 // DeleteRollout permanently deletes a rollout.
@@ -2015,8 +2787,26 @@ func DeleteRollout(c flamego.Context, s session.Session) {
 		return
 	}
 
+	profileID := ""
+	rollout, err := db.GetRolloutByID(c.Request().Context(), rolloutID)
+	if err == nil {
+		release, releaseErr := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
+		if releaseErr == nil {
+			build, buildErr := db.GetBuildByID(c.Request().Context(), release.BuildID)
+			if buildErr == nil {
+				profileID = strings.TrimSpace(build.ProfileID)
+			}
+		}
+	}
+
 	if err := db.DeleteRollout(c.Request().Context(), rolloutID); err != nil {
 		handleMutationError(c, s, "/rollouts", err)
+
+		return
+	}
+
+	if profileID != "" {
+		redirectWithMessage(c, s, profileDeploymentsRolloutsPath(profileID), FlashSuccess, "Rollout permanently deleted")
 
 		return
 	}
@@ -2058,6 +2848,219 @@ func normalizePackageList(packages []string) []string {
 	}
 
 	return normalized
+}
+
+func resolveProfileAccessContext(ctx context.Context, user *db.User, profileID string) (db.ProfileEdit, bool, error) {
+	if user == nil {
+		return db.ProfileEdit{}, false, errSessionUserMissing
+	}
+
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return db.ProfileEdit{}, false, db.ErrProfileNotFound
+	}
+
+	profile, err := db.GetProfileForEdit(ctx, profileID)
+	if err != nil {
+		return db.ProfileEdit{}, false, err
+	}
+
+	canView, err := db.UserCanViewProfile(ctx, user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		return db.ProfileEdit{}, false, err
+	}
+
+	if !canView {
+		return db.ProfileEdit{}, false, db.ErrAccessDenied
+	}
+
+	canManage, err := db.UserCanManageProfile(ctx, user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		return db.ProfileEdit{}, false, err
+	}
+
+	return profile, canManage, nil
+}
+
+func filterBuildsByProfileID(builds []db.Build, profileID string) []db.Build {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return []db.Build{}
+	}
+
+	filtered := make([]db.Build, 0, len(builds))
+	for _, item := range builds {
+		if strings.TrimSpace(item.ProfileID) != profileID {
+			continue
+		}
+
+		filtered = append(filtered, item)
+	}
+
+	return filtered
+}
+
+func buildIDSet(builds []db.Build) map[string]struct{} {
+	ids := make(map[string]struct{}, len(builds))
+	for _, item := range builds {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+
+		ids[id] = struct{}{}
+	}
+
+	return ids
+}
+
+func filterReleasesByBuildIDs(releases []db.Release, buildIDs map[string]struct{}) []db.Release {
+	if len(buildIDs) == 0 {
+		return []db.Release{}
+	}
+
+	filtered := make([]db.Release, 0, len(releases))
+	for _, item := range releases {
+		if _, ok := buildIDs[strings.TrimSpace(item.BuildID)]; !ok {
+			continue
+		}
+
+		filtered = append(filtered, item)
+	}
+
+	return filtered
+}
+
+func releaseIDSet(releases []db.Release) map[string]struct{} {
+	ids := make(map[string]struct{}, len(releases))
+	for _, item := range releases {
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+
+		ids[id] = struct{}{}
+	}
+
+	return ids
+}
+
+func filterRolloutsByReleaseIDs(rollouts []db.Rollout, releaseIDs map[string]struct{}) []db.Rollout {
+	if len(releaseIDs) == 0 {
+		return []db.Rollout{}
+	}
+
+	filtered := make([]db.Rollout, 0, len(rollouts))
+	for _, item := range rollouts {
+		if _, ok := releaseIDs[strings.TrimSpace(item.ReleaseID)]; !ok {
+			continue
+		}
+
+		filtered = append(filtered, item)
+	}
+
+	return filtered
+}
+
+func fleetsAssignedToProfile(profile db.ProfileEdit, fleets []db.Fleet) []db.Fleet {
+	assignedFleetIDs := make(map[string]struct{})
+
+	legacyFleetID := strings.TrimSpace(profile.FleetID)
+	if legacyFleetID != "" {
+		assignedFleetIDs[legacyFleetID] = struct{}{}
+	}
+
+	for _, fleetID := range profile.FleetIDs {
+		trimmedFleetID := strings.TrimSpace(fleetID)
+		if trimmedFleetID == "" {
+			continue
+		}
+
+		assignedFleetIDs[trimmedFleetID] = struct{}{}
+	}
+
+	if len(assignedFleetIDs) == 0 {
+		return []db.Fleet{}
+	}
+
+	filtered := make([]db.Fleet, 0, len(fleets))
+	for _, item := range fleets {
+		if _, ok := assignedFleetIDs[strings.TrimSpace(item.ID)]; !ok {
+			continue
+		}
+
+		filtered = append(filtered, item)
+	}
+
+	return filtered
+}
+
+func profileDeploymentsPath(profileID string) string {
+	return "/profiles/" + profileID + "/deployments"
+}
+
+func profileDeploymentsBuildsPath(profileID string) string {
+	return profileDeploymentsPath(profileID) + "#profile-deployments-builds"
+}
+
+func profileDeploymentsReleasesPath(profileID string) string {
+	return profileDeploymentsPath(profileID) + "#profile-deployments-releases"
+}
+
+func profileDeploymentsRolloutsPath(profileID string) string {
+	return profileDeploymentsPath(profileID) + "#profile-deployments-rollouts"
+}
+
+func profileBuildPath(profileID, buildID string) string {
+	return "/profiles/" + profileID + "/builds/" + buildID
+}
+
+func profileBuildDeletePath(profileID, buildID string) string {
+	return "/profiles/" + profileID + "/builds/" + buildID + "/delete"
+}
+
+func profileReleasePath(profileID, releaseID string) string {
+	return "/profiles/" + profileID + "/releases/" + releaseID
+}
+
+func profileReleaseDeletePath(profileID, releaseID string) string {
+	return "/profiles/" + profileID + "/releases/" + releaseID + "/delete"
+}
+
+func profileRolloutPath(profileID, rolloutID string) string {
+	return "/profiles/" + profileID + "/rollouts/" + rolloutID
+}
+
+func profileRolloutDeletePath(profileID, rolloutID string) string {
+	return "/profiles/" + profileID + "/rollouts/" + rolloutID + "/delete"
+}
+
+func profileRolloutsPathPrefix(profileID string) string {
+	return "/profiles/" + profileID + "/rollouts"
+}
+
+func profileDeploymentsBreadcrumbs(profile db.ProfileEdit, current string) []BreadcrumbItem {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		name = "Profile"
+	}
+
+	items := []BreadcrumbItem{
+		{Name: "Profiles", URL: "/profiles"},
+		{Name: name, URL: profileViewPath(profile.ID)},
+		{Name: "Deployments", URL: profileDeploymentsPath(profile.ID)},
+	}
+
+	currentName := strings.TrimSpace(current)
+	if currentName == "" {
+		items[len(items)-1].IsCurrent = true
+
+		return items
+	}
+
+	items = append(items, BreadcrumbItem{Name: currentName, IsCurrent: true})
+
+	return items
 }
 
 func profileViewPath(profileID string) string {

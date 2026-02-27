@@ -1,0 +1,247 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Deployments</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">Profile Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  <p class="muted-text">Created (UTC): {{ .Profile.CreatedAt }}</p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section id="profile-deployments-builds" class="section-card">
+  <h3>Builds</h3>
+  {{ if .CanManageProfile }}
+  <details class="add-item-details">
+    <summary class="add-item-summary">+ Create Build</summary>
+    <form method="post" action="/profiles/{{ .Profile.ID }}/builds" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <div class="add-item-field">
+        <label for="profile-build-fleet">Fleet</label>
+        <select id="profile-build-fleet" name="fleet_id" class="form-item" required>
+          <option value="">Select fleet</option>
+          {{ range .DeploymentFleets }}
+          <option value="{{ .ID }}">{{ .Name }}</option>
+          {{ end }}
+        </select>
+        <small class="muted-text">Selected fleet must be assigned to this profile.</small>
+      </div>
+      <div class="add-item-field">
+        <label for="profile-build-version">Version</label>
+        <input id="profile-build-version" name="version" class="form-item" placeholder="v1.1.0" pattern="^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$" title="Use semver with v prefix, for example v1.1.0" required />
+      </div>
+      <button type="submit" class="btn">Create Build</button>
+    </form>
+  </details>
+  {{ else }}
+  <p class="muted-text">You can view deployment history, but only profile managers can create builds.</p>
+  {{ end }}
+
+  {{ if .ProfileBuilds }}
+  <div class="list-card-list">
+    {{ range .ProfileBuilds }}
+    <div class="list-card list-card-clickable build-list-card">
+      <a href="/profiles/{{ $.Profile.ID }}/builds/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-hammer"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .Version }}</div>
+            <div class="list-card-meta build-list-meta">
+              <span class="muted-text">Fleet: {{ if .FleetName }}{{ .FleetName }}{{ else }}-{{ end }}</span>
+              <span class="muted-text">Profile revision: r{{ .ProfileRevision }}</span>
+              <span class="muted-text">Build status: <span class="status-badge status-{{ .Status }}">{{ .Status }}</span></span>
+              <span class="muted-text">Installer status: {{ if eq .InstallerStatus "not_requested" }}not_requested{{ else }}<span class="status-badge status-{{ .InstallerStatus }}">{{ .InstallerStatus }}</span>{{ end }}</span>
+              <span class="muted-text">Created (UTC): {{ .CreatedAt }}</span>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No builds for this profile yet.</p>
+  {{ end }}
+</section>
+
+<section id="profile-deployments-releases" class="section-card">
+  <h3>Releases</h3>
+  {{ if .CanManageProfile }}
+  <details class="add-item-details">
+    <summary class="add-item-summary">+ Create Release</summary>
+    <form method="post" action="/profiles/{{ .Profile.ID }}/releases" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <div class="add-item-field">
+        <label for="profile-release-build">Build</label>
+        <select id="profile-release-build" name="build_id" class="form-item" required>
+          <option value="">Select build</option>
+          {{ range .ProfileBuilds }}
+          <option value="{{ .ID }}" data-build-version="{{ .Version }}">{{ .Version }} ({{ if .FleetName }}{{ .FleetName }}{{ else }}-{{ end }} - {{ .Status }})</option>
+          {{ end }}
+        </select>
+      </div>
+      <div class="add-item-field">
+        <label for="profile-release-version">Release Version</label>
+        <input id="profile-release-version" name="version" class="form-item" placeholder="v1.1.0" pattern="^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$" title="Use semver with v prefix, for example v1.1.0" required />
+      </div>
+      <div class="add-item-field">
+        <label for="profile-release-channel">Channel</label>
+        <input id="profile-release-channel" name="channel" class="form-item" value="stable" />
+      </div>
+      <div class="add-item-field">
+        <label for="profile-release-notes">Notes</label>
+        <textarea id="profile-release-notes" name="notes" class="form-item" rows="3"></textarea>
+      </div>
+      <button type="submit" class="btn">Create Release</button>
+    </form>
+  </details>
+  {{ else }}
+  <p class="muted-text">You can view release history, but only profile managers can create releases.</p>
+  {{ end }}
+
+  {{ if .ProfileReleases }}
+  <div class="list-card-list">
+    {{ range .ProfileReleases }}
+    <div class="list-card list-card-clickable release-list-card">
+      <a href="/profiles/{{ $.Profile.ID }}/releases/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-tag"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .Version }}</div>
+            <div class="list-card-meta release-list-meta">
+              <span class="muted-text">Channel: <span class="badge">{{ .Channel }}</span></span>
+              <span class="muted-text">Status: <span class="status-badge status-{{ .Status }}">{{ if eq .Status "withdrawn" }}taken down{{ else }}{{ .Status }}{{ end }}</span></span>
+              <span class="muted-text">Fleet: {{ if .FleetName }}{{ .FleetName }}{{ else }}-{{ end }}</span>
+              <span class="muted-text">Build: {{ .Build }}</span>
+              <span class="muted-text">Published (UTC): {{ .PublishedAt }}</span>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No releases for this profile yet.</p>
+  {{ end }}
+</section>
+
+<section id="profile-deployments-rollouts" class="section-card">
+  <h3>Rollouts</h3>
+  {{ if .CanManageProfile }}
+  <details class="add-item-details">
+    <summary class="add-item-summary">+ Create Rollout</summary>
+    <form method="post" action="/profiles/{{ .Profile.ID }}/rollouts" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <div class="add-item-field">
+        <label for="profile-rollout-fleet">Fleet</label>
+        <select id="profile-rollout-fleet" name="fleet_id" class="form-item" required>
+          <option value="">Select fleet</option>
+          {{ range .DeploymentFleets }}
+          <option value="{{ .ID }}">{{ .Name }}</option>
+          {{ end }}
+        </select>
+      </div>
+      <div class="add-item-field">
+        <label for="profile-rollout-release">Release</label>
+        <select id="profile-rollout-release" name="release_id" class="form-item" required>
+          <option value="">Select release</option>
+          {{ range .ProfileReleases }}
+          <option value="{{ .ID }}"{{ if eq .Status "withdrawn" }} disabled{{ end }}>{{ .Version }} ({{ .Channel }}{{ if .FleetName }} - {{ .FleetName }}{{ end }}{{ if eq .Status "withdrawn" }} - taken down{{ end }})</option>
+          {{ end }}
+        </select>
+      </div>
+      <div class="add-item-field">
+        <p class="muted-text">Rollout mode is currently fixed to all-at-once (100%).</p>
+      </div>
+      <button type="submit" class="btn">Create Rollout</button>
+    </form>
+  </details>
+  {{ else }}
+  <p class="muted-text">You can view rollout history, but only profile managers can create rollouts.</p>
+  {{ end }}
+
+  {{ if .ProfileRollouts }}
+  <div class="list-card-list">
+    {{ range .ProfileRollouts }}
+    <div class="list-card list-card-clickable rollout-list-card">
+      <a href="/profiles/{{ $.Profile.ID }}/rollouts/{{ .ID }}" class="list-card-link list-card-entry-link">
+        <div class="list-card-entry">
+          <span class="list-card-leading">
+            <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span>
+          </span>
+          <div class="list-card-entry-body">
+            <div class="list-card-title">{{ .ReleaseVersion }} for {{ .FleetName }}</div>
+            <div class="list-card-meta rollout-list-meta">
+              <span class="muted-text">Rollout: <code>{{ .ID }}</code></span>
+              <span class="muted-text">Release status: <span class="status-badge status-{{ .ReleaseStatus }}">{{ if eq .ReleaseStatus "withdrawn" }}taken down{{ else }}{{ .ReleaseStatus }}{{ end }}</span></span>
+              <span class="muted-text">Strategy: {{ .Strategy }}</span>
+              <span class="muted-text">Stage: {{ .StagePercent }}%</span>
+              <span class="muted-text">Status: <span class="status-badge status-{{ .Status }}">{{ .Status }}</span></span>
+              <span class="muted-text">Started (UTC): {{ if .StartedAt }}{{ .StartedAt }}{{ else }}-{{ end }}</span>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+    {{ end }}
+  </div>
+  {{ else }}
+  <p class="muted-text">No rollouts for this profile yet.</p>
+  {{ end }}
+</section>
+
+<script>
+  (() => {
+    const buildSelect = document.getElementById("profile-release-build")
+    const versionInput = document.getElementById("profile-release-version")
+    if (!buildSelect || !versionInput) {
+      return
+    }
+
+    const syncReleaseVersionFromBuild = () => {
+      const selectedOption = buildSelect.options[buildSelect.selectedIndex]
+      if (!selectedOption) {
+        return
+      }
+
+      const buildVersion = selectedOption.getAttribute("data-build-version")
+      if (!buildVersion) {
+        return
+      }
+
+      versionInput.value = buildVersion
+    }
+
+    buildSelect.addEventListener("change", syncReleaseVersionFromBuild)
+    syncReleaseVersionFromBuild()
+  })()
+</script>
+
+{{ template "foot" . }}

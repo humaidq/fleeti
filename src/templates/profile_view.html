@@ -43,8 +43,17 @@
 
 <section class="section-card">
   <h3>Configuration Overview</h3>
-  {{ if .CanManageProfile }}
   <div class="list-card-list">
+    <div class="list-card profile-section-card">
+      <div class="profile-section-card-header">
+        <div>
+          <div class="list-card-title">Deployments</div>
+          <div class="muted-text">Builds, releases, and rollouts for this profile</div>
+        </div>
+        <a href="/profiles/{{ .Profile.ID }}/deployments" class="btn">Open Deployments</a>
+      </div>
+    </div>
+    {{ if .CanManageProfile }}
     <div class="list-card profile-section-card">
       <div class="profile-section-card-header">
         <div>
@@ -90,8 +99,8 @@
         <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="btn">Open Raw Nix</a>
       </div>
     </div>
+    {{ end }}
   </div>
-  {{ end }}
 </section>
 
 {{ if .Packages }}

@@ -8,41 +8,9 @@
 </div>
 
 <section class="section-card">
-  <h3>Create Build</h3>
-  <details class="add-item-details">
-    <summary class="add-item-summary">+ Create Build</summary>
-    <form method="post" action="/builds" class="add-item-form">
-      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
-      <div class="add-item-field">
-        <label for="build-profile">Profile</label>
-        <select id="build-profile" name="profile_id" class="form-item" required>
-          <option value="">Select profile</option>
-          {{ range .Profiles }}
-          <option value="{{ .ID }}">{{ .Name }}</option>
-          {{ end }}
-        </select>
-        <small class="muted-text">Build uses the latest profile revision.</small>
-      </div>
-      <div class="add-item-field">
-        <label for="build-fleet">Fleet</label>
-        <select id="build-fleet" name="fleet_id" class="form-item" required>
-          <option value="">Select fleet</option>
-          {{ range .Fleets }}
-          <option value="{{ .ID }}">{{ .Name }}</option>
-          {{ end }}
-        </select>
-        <small class="muted-text">Selected fleet must be assigned to this profile.</small>
-      </div>
-      <div class="add-item-field">
-        <label for="build-version">Version</label>
-        <input id="build-version" name="version" class="form-item" placeholder="v1.1.0" pattern="^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$" title="Use semver with v prefix, for example v1.1.0" required />
-      </div>
-      <div class="add-item-field">
-        <p class="muted-text">Build status and artifact path are set automatically after the Nix build finishes.</p>
-      </div>
-      <button type="submit" class="btn">Create Build</button>
-    </form>
-  </details>
+  <h3>Create Build from a Profile</h3>
+  <p class="muted-text">Build creation now lives inside each profile under the Deployments tab.</p>
+  <a href="/profiles" class="btn">Open Profiles</a>
 </section>
 
 <section class="section-card">
@@ -51,7 +19,7 @@
   <div class="list-card-list">
     {{ range .Builds }}
     <div class="list-card list-card-clickable build-list-card">
-      <a href="/builds/{{ .ID }}" class="list-card-link list-card-entry-link">
+      <a href="/profiles/{{ .ProfileID }}/builds/{{ .ID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
             <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-hammer"></i></span>

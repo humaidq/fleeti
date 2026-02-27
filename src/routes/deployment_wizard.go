@@ -691,8 +691,9 @@ func DeploymentWizardRollout(c flamego.Context, s session.Session) {
 		return
 	}
 
+	redirectPath := profileDeploymentsRolloutsPath(state.ProfileID)
 	clearDeploymentWizardState(s)
-	redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+	redirectWithMessage(c, s, redirectPath, FlashSuccess, "Rollout created and activated")
 }
 
 func createAndActivateRollout(ctx context.Context, fleetID, releaseID string) error {

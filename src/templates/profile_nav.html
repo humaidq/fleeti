@@ -1,6 +1,7 @@
 {{ define "profile_nav" }}
 <nav class="profile-section-nav" aria-label="Profile sections">
   <a href="/profiles/{{ .Profile.ID }}" class="profile-section-link{{ if eq .ProfileNavActive "summary" }} profile-section-link-active{{ end }}">Summary</a>
+  <a href="/profiles/{{ .Profile.ID }}/deployments" class="profile-section-link{{ if eq .ProfileNavActive "deployments" }} profile-section-link-active{{ end }}">Deployments</a>
   {{ if .CanManageProfile }}
   <a href="/profiles/{{ .Profile.ID }}/edit" class="profile-section-link{{ if eq .ProfileNavActive "settings" }} profile-section-link-active{{ end }}">Settings</a>
   <a href="/profiles/{{ .Profile.ID }}/access" class="profile-section-link{{ if eq .ProfileNavActive "access" }} profile-section-link-active{{ end }}">Access</a>

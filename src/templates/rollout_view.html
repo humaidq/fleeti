@@ -16,14 +16,16 @@
 <div class="page-header">
   <h2>Rollout Summary</h2>
   <div class="page-header-actions">
-    <form method="post" action="/rollouts/{{ .Rollout.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this rollout? This cannot be undone.');">
+    {{ if .CanManageRollout }}
+    <form method="post" action="{{ if .RolloutDeletePath }}{{ .RolloutDeletePath }}{{ else }}/rollouts/{{ .Rollout.ID }}/delete{{ end }}" class="inline-form" onsubmit="return confirm('Permanently delete this rollout? This cannot be undone.');">
       <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn btn-danger">Delete Permanently</button>
     </form>
-    {{ if .HasRelease }}
-    <a href="/releases/{{ .Rollout.ReleaseID }}" class="btn">View Release</a>
     {{ end }}
-    <a href="/rollouts" class="btn">Back to Rollouts</a>
+    {{ if .HasRelease }}
+    <a href="{{ if .RolloutReleasePath }}{{ .RolloutReleasePath }}{{ else }}/releases/{{ .Rollout.ReleaseID }}{{ end }}" class="btn">View Release</a>
+    {{ end }}
+    <a href="{{ if .RolloutBackPath }}{{ .RolloutBackPath }}{{ else }}/rollouts{{ end }}" class="btn">Back to Rollouts</a>
   </div>
 </div>
 
@@ -80,7 +82,7 @@
   <div class="list-card-list">
     {{ if .HasRelease }}
     <div class="list-card list-card-clickable release-list-card">
-      <a href="/releases/{{ .Rollout.ReleaseID }}" class="list-card-link list-card-entry-link">
+      <a href="{{ if .RolloutReleasePath }}{{ .RolloutReleasePath }}{{ else }}/releases/{{ .Rollout.ReleaseID }}{{ end }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
             <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-tag"></i></span>
@@ -95,7 +97,7 @@
     {{ end }}
 
     <div class="list-card list-card-clickable">
-      <a href="/releases" class="list-card-link list-card-entry-link">
+      <a href="{{ if .RolloutReleasesPath }}{{ .RolloutReleasesPath }}{{ else }}/releases{{ end }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
             <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-list"></i></span>
