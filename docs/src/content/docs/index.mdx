@@ -2,25 +2,24 @@
 title: Fleeti
 description: The main Fleeti website and knowledge base.
 template: splash
+tableOfContents: false
 hero:
-  tagline: A web platform for defining, building, deploying, and monitoring secure Linux system images at fleet scale.
+  title: Build once. Deploy <span class="hero-accent">everywhere.</span>
+  tagline: Leverage Fleeti with Nix-based workflows to define, build, deploy, and monitor secure Linux images across your fleet.
 
   actions:
-    - text: Wiki Overview
-      link: /overview/
-      icon: open-book
-    - text: Quickstart
+    - text: Get started
       link: /guides/example/
       icon: right-arrow
-    - text: GitHub
-      link: https://github.com/humaidq/fleeti
-      icon: external
-      variant: minimal
+    - text: Overview
+      link: /overview/
+      icon: open-book
+      variant: secondary
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Start here
+## Start with docs
 
 <CardGrid stagger>
 	<Card title="Project overview" icon="open-book">

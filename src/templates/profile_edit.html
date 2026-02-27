@@ -27,8 +27,29 @@
     Current revision: r{{ .Profile.LatestRevision }}
     {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
   </p>
+  <p class="muted-text">Visibility: {{ if eq .Profile.Visibility "visible" }}visible{{ else }}private{{ end }}</p>
   {{ template "profile_nav" . }}
 </section>
+
+{{ if .IsAdmin }}
+<section class="section-card">
+  <h3>Visibility</h3>
+  <form method="post" action="/profiles/{{ .Profile.ID }}/visibility" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label for="profile-visibility">Visibility</label>
+      <select id="profile-visibility" name="visibility" class="form-item">
+        <option value="private"{{ if eq .Profile.Visibility "private" }} selected{{ end }}>Private</option>
+        <option value="visible"{{ if eq .Profile.Visibility "visible" }} selected{{ end }}>Visible</option>
+      </select>
+      <small class="muted-text">Only admins can change visibility permissions.</small>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save Visibility</button>
+    </div>
+  </form>
+</section>
+{{ end }}
 
 <section class="section-card">
   <h3>Metadata</h3>

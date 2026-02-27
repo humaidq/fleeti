@@ -61,6 +61,9 @@ in
         "postgresql.service"
       ];
       requires = [ "postgresql.service" ];
+      path = [
+        pkgs.nix
+      ];
 
       serviceConfig = {
         Type = "simple";

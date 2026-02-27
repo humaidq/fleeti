@@ -47,8 +47,21 @@ func DeploymentWizardPage(c flamego.Context, s session.Session, t template.Templ
 	data["IsWizard"] = true
 
 	state := getDeploymentWizardState(s)
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		logger.Error("failed to resolve session user for deployment wizard", "error", err)
+		setPageErrorFlash(data, "Failed to load deployment wizard")
+		data["WizardFleets"] = []db.Fleet{}
+		data["WizardProfiles"] = []db.Profile{}
+		data["WizardBuilds"] = []db.Build{}
+		data["WizardReleases"] = []db.Release{}
 
-	fleets, err := db.ListFleets(c.Request().Context())
+		t.HTML(http.StatusOK, "deployment_wizard")
+
+		return
+	}
+
+	fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list fleets for deployment wizard", "error", err)
 		setPageErrorFlash(data, "Failed to load fleets")
@@ -64,7 +77,7 @@ func DeploymentWizardPage(c flamego.Context, s session.Session, t template.Templ
 	selectedProfile := db.Profile{}
 	profileSelected := false
 	if fleetSelected {
-		allProfiles, listErr := db.ListProfiles(c.Request().Context())
+		allProfiles, listErr := db.ListProfilesForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 		if listErr != nil {
 			logger.Error("failed to list profiles for deployment wizard", "fleet_id", state.FleetID, "error", listErr)
 			setPageErrorFlash(data, "Failed to load profiles")
@@ -195,6 +208,13 @@ func DeploymentWizardRestartFromBuild(c flamego.Context, s session.Session) {
 
 // DeploymentWizardFleet handles fleet selection and creation for the wizard.
 func DeploymentWizardFleet(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, deploymentWizardBasePath, db.ErrAccessDenied)
+
+		return
+	}
+
 	if err := c.Request().ParseForm(); err != nil {
 		redirectWithMessage(c, s, deploymentWizardBasePath, FlashError, "Failed to parse form")
 
@@ -212,7 +232,7 @@ func DeploymentWizardFleet(c flamego.Context, s session.Session) {
 			return
 		}
 
-		fleets, err := db.ListFleets(c.Request().Context())
+		fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 		if err != nil {
 			logger.Error("failed to list fleets for wizard fleet selection", "error", err)
 			redirectWithMessage(c, s, deploymentWizardBasePath, FlashError, "Failed to load fleets")
@@ -235,13 +255,13 @@ func DeploymentWizardFleet(c flamego.Context, s session.Session) {
 		name := strings.TrimSpace(c.Request().Form.Get("name"))
 		description := strings.TrimSpace(c.Request().Form.Get("description"))
 
-		if err := db.CreateFleet(c.Request().Context(), name, description); err != nil {
+		if err := db.CreateFleet(c.Request().Context(), name, description, user.ID.String()); err != nil {
 			handleMutationError(c, s, deploymentWizardBasePath, err)
 
 			return
 		}
 
-		fleets, err := db.ListFleets(c.Request().Context())
+		fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 		if err != nil {
 			logger.Error("failed to list fleets after wizard fleet creation", "fleet_name", name, "error", err)
 			redirectWithMessage(c, s, deploymentWizardBasePath, FlashError, "Fleet created but failed to reload wizard")
@@ -271,6 +291,13 @@ func DeploymentWizardFleet(c flamego.Context, s session.Session) {
 
 // DeploymentWizardProfile handles profile selection and creation for the wizard.
 func DeploymentWizardProfile(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, deploymentWizardBasePath, db.ErrAccessDenied)
+
+		return
+	}
+
 	if err := c.Request().ParseForm(); err != nil {
 		redirectWithMessage(c, s, deploymentWizardBasePath, FlashError, "Failed to parse form")
 
@@ -286,7 +313,7 @@ func DeploymentWizardProfile(c flamego.Context, s session.Session) {
 
 	intent := strings.TrimSpace(c.Request().Form.Get("intent"))
 
-	allProfiles, err := db.ListProfiles(c.Request().Context())
+	allProfiles, err := db.ListProfilesForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list profiles for wizard profile step", "fleet_id", state.FleetID, "error", err)
 		redirectWithMessage(c, s, deploymentWizardPath(deploymentWizardState{FleetID: state.FleetID}), FlashError, "Failed to load profiles")
@@ -323,6 +350,12 @@ func DeploymentWizardProfile(c flamego.Context, s session.Session) {
 		name := strings.TrimSpace(c.Request().Form.Get("name"))
 		description := strings.TrimSpace(c.Request().Form.Get("description"))
 
+		if err := ensureUserCanManageFleetIDs(c.Request().Context(), user, []string{state.FleetID}); err != nil {
+			handleMutationError(c, s, deploymentWizardPath(deploymentWizardState{FleetID: state.FleetID}), err)
+
+			return
+		}
+
 		input := db.CreateProfileInput{
 			FleetIDs:    []string{state.FleetID},
 			Name:        name,
@@ -330,13 +363,13 @@ func DeploymentWizardProfile(c flamego.Context, s session.Session) {
 			ConfigJSON:  `{"packages":[]}`,
 		}
 
-		if err := db.CreateProfile(c.Request().Context(), input); err != nil {
+		if err := db.CreateProfile(c.Request().Context(), input, user.ID.String()); err != nil {
 			handleMutationError(c, s, deploymentWizardPath(deploymentWizardState{FleetID: state.FleetID}), err)
 
 			return
 		}
 
-		allProfiles, err = db.ListProfiles(c.Request().Context())
+		allProfiles, err = db.ListProfilesForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 		if err != nil {
 			logger.Error("failed to list profiles after wizard profile creation", "fleet_id", state.FleetID, "profile_name", name, "error", err)
 			redirectWithMessage(c, s, deploymentWizardPath(deploymentWizardState{FleetID: state.FleetID}), FlashError, "Profile created but failed to reload wizard")

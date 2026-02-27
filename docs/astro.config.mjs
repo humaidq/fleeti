@@ -7,8 +7,10 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Fleeti',
+			customCss: ['/src/styles/landing.css'],
 			components: {
-				SocialIcons: './src/components/SocialIcons.astro',
+				Header: './src/components/Header.astro',
+				Hero: './src/components/Hero.astro',
 			},
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/humaidq/fleeti' }],
 			sidebar: [

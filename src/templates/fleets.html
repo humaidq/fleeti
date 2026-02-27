@@ -35,6 +35,7 @@
         <tr>
           <th>Name</th>
           <th>Description</th>
+          <th>Visibility</th>
           <th>Created (UTC)</th>
           <th>Actions</th>
         </tr>
@@ -44,12 +45,30 @@
         <tr>
           <td><strong>{{ .Name }}</strong></td>
           <td>{{ if .Description }}{{ .Description }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+          <td>
+            {{ if $.IsAdmin }}
+            <form method="post" action="/fleets/{{ .ID }}/visibility" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+              <select name="visibility" class="form-item">
+                <option value="private"{{ if eq .Visibility "private" }} selected{{ end }}>Private</option>
+                <option value="visible"{{ if eq .Visibility "visible" }} selected{{ end }}>Visible</option>
+              </select>
+              <button type="submit" class="btn">Save</button>
+            </form>
+            {{ else }}
+              {{ if eq .Visibility "visible" }}Visible{{ else }}Private{{ end }}
+            {{ end }}
+          </td>
           <td>{{ .CreatedAt }}</td>
           <td>
+            {{ if index $.ManageableFleetIDs .ID }}
             <form method="post" action="/fleets/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this fleet and all associated data? This cannot be undone.');">
               <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
               <button type="submit" class="btn btn-danger">Delete Permanently</button>
             </form>
+            {{ else }}
+            <span class="muted-text">No actions</span>
+            {{ end }}
           </td>
         </tr>
       {{ end }}

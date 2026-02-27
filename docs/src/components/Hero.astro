@@ -1,0 +1,256 @@
+---
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+---
+
+<section class="fleeti-hero">
+	<div class="hero-copy">
+		<h1 id="_top" data-page-title set:html={title} />
+		{tagline && <p class="hero-tagline" set:html={tagline} />}
+		{
+			actions.length > 0 && (
+				<div class="hero-actions">
+					{actions.map(({ link: href, text, variant = 'primary' }) => (
+						<a href={href} class={`hero-link ${variant}`}>{text}</a>
+					))}
+				</div>
+			)
+		}
+	</div>
+
+	<div class="hero-art" aria-hidden="true">
+		<div class="hero-blob hero-blob-main"></div>
+		<div class="hero-blob hero-blob-sub"></div>
+		<div class="desk-scene">
+			<div class="screen">
+				<div class="screen-top"></div>
+				<div class="screen-line highlight"></div>
+				<div class="screen-line"></div>
+				<div class="screen-line"></div>
+			</div>
+			<div class="laptop"></div>
+			<div class="person"></div>
+			<div class="desk"></div>
+		</div>
+	</div>
+</section>
+
+<style>
+	@layer starlight.core {
+		.fleeti-hero {
+			display: grid;
+			gap: 2rem;
+			align-items: center;
+			padding: clamp(1.5rem, 4vw, 3rem) 0 clamp(1.75rem, 4vw, 3.25rem);
+		}
+
+		.hero-copy {
+			display: flex;
+			flex-direction: column;
+			gap: 1.2rem;
+			animation: rise-in 520ms ease both;
+		}
+
+		h1 {
+			margin: 0;
+			max-width: 12ch;
+			font-size: clamp(2rem, 6vw, 4.25rem);
+			line-height: 1.06;
+			letter-spacing: -0.02em;
+			font-weight: 700;
+			color: #111d3a;
+		}
+
+		:global(.hero-accent) {
+			color: #0f5f8f;
+		}
+
+		.hero-tagline {
+			margin: 0;
+			max-width: 46ch;
+			font-size: clamp(1rem, 2.3vw, 1.35rem);
+			line-height: 1.55;
+			color: #3f4f76;
+		}
+
+		.hero-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.8rem;
+		}
+
+		.hero-link {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			height: 2.9rem;
+			padding: 0 1.4rem;
+			border-radius: 0.65rem;
+			font-size: 1rem;
+			font-weight: 600;
+			text-decoration: none;
+			transition: transform 170ms ease, box-shadow 170ms ease;
+		}
+
+		.hero-link.primary {
+			color: #f7fbfe;
+			background: #0f5f8f;
+			border: 1px solid #0a476a;
+			box-shadow: 0 16px 28px -24px rgba(10, 71, 106, 0.8);
+		}
+
+		.hero-link.secondary,
+		.hero-link.minimal {
+			color: #0f5f8f;
+			background: #ffffff;
+			border: 1px solid #94bad0;
+		}
+
+		.hero-link:hover {
+			transform: translateY(-1px);
+		}
+
+		.hero-link.primary:hover {
+			background: #0c547e;
+		}
+
+		.hero-art {
+			position: relative;
+			height: clamp(16rem, 42vw, 30rem);
+			animation: float-in 650ms ease 90ms both;
+		}
+
+		.hero-blob {
+			position: absolute;
+			border-radius: 999px;
+			background: rgba(78, 145, 184, 0.2);
+		}
+
+		.hero-blob-main {
+			inset: 5% 12% 8% 0;
+		}
+
+		.hero-blob-sub {
+			right: 1%;
+			bottom: 2%;
+			width: 38%;
+			height: 45%;
+			background: rgba(143, 191, 216, 0.35);
+		}
+
+		.desk-scene {
+			position: absolute;
+			inset: 0;
+		}
+
+		.screen {
+			position: absolute;
+			left: 9%;
+			top: 31%;
+			width: 46%;
+			height: 36%;
+			border-radius: 0.85rem;
+			border: 5px solid #47496d;
+			background: #f6f8fc;
+			padding: 0.7rem;
+		}
+
+		.screen-top {
+			height: 0.25rem;
+			border-radius: 999px;
+			background: #4e5175;
+			margin-bottom: 1.1rem;
+		}
+
+		.screen-line {
+			height: 0.5rem;
+			border-radius: 999px;
+			background: #d4deef;
+			margin-bottom: 0.55rem;
+		}
+
+		.screen-line.highlight {
+			width: 45%;
+			background: #0f5f8f;
+		}
+
+		.laptop {
+			position: absolute;
+			right: 14%;
+			bottom: 24%;
+			width: 25%;
+			height: 19%;
+			border-radius: 0.55rem;
+			background: linear-gradient(165deg, #263058 0%, #38427a 100%);
+		}
+
+		.person {
+			position: absolute;
+			right: 24%;
+			bottom: 10%;
+			width: 30%;
+			height: 46%;
+			border-radius: 55% 55% 25% 25%;
+			background: #2f3250;
+		}
+
+		.desk {
+			position: absolute;
+			inset: auto 0 7% 0;
+			height: 1.8rem;
+			background: #4a4a69;
+		}
+
+		@keyframes rise-in {
+			from {
+				opacity: 0;
+				transform: translateY(16px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+
+		@keyframes float-in {
+			from {
+				opacity: 0;
+				transform: translateY(12px) scale(0.98);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0) scale(1);
+			}
+		}
+
+		@media (min-width: 64rem) {
+			.fleeti-hero {
+				grid-template-columns: 1fr 1fr;
+				gap: clamp(2rem, 5vw, 4.5rem);
+			}
+		}
+
+		@media (max-width: 64rem) {
+			.hero-art {
+				height: clamp(14rem, 55vw, 24rem);
+			}
+
+			.screen {
+				left: 10%;
+				top: 30%;
+				width: 48%;
+				height: 40%;
+			}
+		}
+
+		@media (max-width: 32rem) {
+			.hero-link {
+				width: 100%;
+			}
+
+			h1 {
+				max-width: 15ch;
+			}
+		}
+	}
+</style>

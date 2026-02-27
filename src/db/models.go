@@ -51,6 +51,9 @@ const (
 	RolloutStatusPaused     = "paused"
 	RolloutStatusCompleted  = "completed"
 	RolloutStatusFailed     = "failed"
+
+	VisibilityPrivate = "private"
+	VisibilityVisible = "visible"
 )
 
 type DashboardCounts struct {
@@ -67,6 +70,8 @@ type Fleet struct {
 	ID          string
 	Name        string
 	Description string
+	OwnerUserID string
+	Visibility  string
 	CreatedAt   string
 }
 
@@ -77,6 +82,8 @@ type Profile struct {
 	FleetName      string
 	Name           string
 	Description    string
+	OwnerUserID    string
+	Visibility     string
 	LatestRevision int
 	ConfigHash     string
 	CreatedAt      string
@@ -89,6 +96,8 @@ type ProfileEdit struct {
 	FleetName           string
 	Name                string
 	Description         string
+	OwnerUserID         string
+	Visibility          string
 	LatestRevision      int
 	ConfigHash          string
 	ConfigSchemaVersion int
@@ -260,6 +269,8 @@ func ListFleets(ctx context.Context) ([]Fleet, error) {
 			id::text,
 			name,
 			description,
+			COALESCE(owner_user_id::text, ''),
+			visibility,
 			to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 		FROM fleets
 		ORDER BY created_at DESC, name ASC
@@ -274,7 +285,7 @@ func ListFleets(ctx context.Context) ([]Fleet, error) {
 	for rows.Next() {
 		var item Fleet
 
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.OwnerUserID, &item.Visibility, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan fleet: %w", err)
 		}
 
@@ -288,7 +299,7 @@ func ListFleets(ctx context.Context) ([]Fleet, error) {
 	return fleets, nil
 }
 
-func CreateFleet(ctx context.Context, name, description string) error {
+func CreateFleet(ctx context.Context, name, description, ownerUserID string) error {
 	p := GetPool()
 	if p == nil {
 		return ErrDatabaseConnectionNotInitialized
@@ -296,21 +307,164 @@ func CreateFleet(ctx context.Context, name, description string) error {
 
 	name = strings.TrimSpace(name)
 	description = strings.TrimSpace(description)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+
+	var owner any
+	if ownerUserID != "" {
+		owner = ownerUserID
+	}
 
 	if name == "" {
 		return ErrNameRequired
 	}
 
 	_, err := p.Exec(ctx, `
-		INSERT INTO fleets (name, description)
-		VALUES ($1, $2)
-	`, name, description)
+		INSERT INTO fleets (name, description, owner_user_id, visibility)
+		VALUES ($1, $2, $3, $4)
+	`, name, description, owner, VisibilityPrivate)
 	if uniqueViolation(err) {
 		return ErrFleetAlreadyExists
 	}
 
 	if err != nil {
 		return fmt.Errorf("failed to create fleet: %w", err)
+	}
+
+	return nil
+}
+
+func ListFleetsForUser(ctx context.Context, userID string, isAdmin bool) ([]Fleet, error) {
+	if isAdmin {
+		return ListFleets(ctx)
+	}
+
+	p := GetPool()
+	if p == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+
+	rows, err := p.Query(ctx, `
+		SELECT
+			id::text,
+			name,
+			description,
+			COALESCE(owner_user_id::text, ''),
+			visibility,
+			to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+		FROM fleets
+		WHERE owner_user_id::text = $1
+		   OR visibility = $2
+		ORDER BY created_at DESC, name ASC
+	`, userID, VisibilityVisible)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list fleets for user: %w", err)
+	}
+
+	defer rows.Close()
+
+	fleets := make([]Fleet, 0)
+	for rows.Next() {
+		var item Fleet
+
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.OwnerUserID, &item.Visibility, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan fleet for user: %w", err)
+		}
+
+		fleets = append(fleets, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed during fleet rows iteration for user: %w", err)
+	}
+
+	return fleets, nil
+}
+
+func UserCanViewFleet(ctx context.Context, userID string, isAdmin bool, fleetID string) (bool, error) {
+	p := GetPool()
+	if p == nil {
+		return false, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return false, ErrFleetRequired
+	}
+
+	var canView bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM fleets
+			WHERE id::text = $1
+			  AND ($2 OR owner_user_id::text = $3 OR visibility = $4)
+		)
+	`, fleetID, isAdmin, userID, VisibilityVisible).Scan(&canView)
+	if err != nil {
+		return false, fmt.Errorf("failed to validate fleet access: %w", err)
+	}
+
+	return canView, nil
+}
+
+func UserCanManageFleet(ctx context.Context, userID string, isAdmin bool, fleetID string) (bool, error) {
+	p := GetPool()
+	if p == nil {
+		return false, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return false, ErrFleetRequired
+	}
+
+	var canManage bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM fleets
+			WHERE id::text = $1
+			  AND ($2 OR owner_user_id::text = $3)
+		)
+	`, fleetID, isAdmin, userID).Scan(&canManage)
+	if err != nil {
+		return false, fmt.Errorf("failed to validate fleet management access: %w", err)
+	}
+
+	return canManage, nil
+}
+
+func SetFleetVisibility(ctx context.Context, fleetID, visibility string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return ErrFleetRequired
+	}
+
+	normalizedVisibility, err := normalizeVisibility(visibility)
+	if err != nil {
+		return err
+	}
+
+	result, err := p.Exec(ctx, `
+		UPDATE fleets
+		SET visibility = $2
+		WHERE id::text = $1
+	`, fleetID, normalizedVisibility)
+	if err != nil {
+		return fmt.Errorf("failed to update fleet visibility: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrFleetNotFound
 	}
 
 	return nil
@@ -355,6 +509,8 @@ func ListProfiles(ctx context.Context) ([]Profile, error) {
 			COALESCE(string_agg(DISTINCT f.name, ', ' ORDER BY f.name), ''),
 			p.name,
 			p.description,
+			COALESCE(p.owner_user_id::text, ''),
+			p.visibility,
 			COALESCE(pr.revision, 0),
 			COALESCE(pr.config_hash, ''),
 			to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
@@ -370,7 +526,7 @@ func ListProfiles(ctx context.Context) ([]Profile, error) {
 			ORDER BY revision DESC
 			LIMIT 1
 		) pr ON true
-		GROUP BY p.id, p.name, p.description, pr.revision, pr.config_hash, p.created_at
+		GROUP BY p.id, p.name, p.description, p.owner_user_id, p.visibility, pr.revision, pr.config_hash, p.created_at
 		ORDER BY p.created_at DESC, p.name ASC
 	`)
 	if err != nil {
@@ -390,6 +546,8 @@ func ListProfiles(ctx context.Context) ([]Profile, error) {
 			&item.FleetName,
 			&item.Name,
 			&item.Description,
+			&item.OwnerUserID,
+			&item.Visibility,
 			&item.LatestRevision,
 			&item.ConfigHash,
 			&item.CreatedAt,
@@ -412,6 +570,176 @@ func ListProfiles(ctx context.Context) ([]Profile, error) {
 	return profiles, nil
 }
 
+func ListProfilesForUser(ctx context.Context, userID string, isAdmin bool) ([]Profile, error) {
+	if isAdmin {
+		return ListProfiles(ctx)
+	}
+
+	p := GetPool()
+	if p == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+
+	rows, err := p.Query(ctx, `
+		SELECT
+			p.id::text,
+			COALESCE(string_agg(DISTINCT f.id::text, ',' ORDER BY f.id::text), ''),
+			COALESCE(string_agg(DISTINCT f.name, ', ' ORDER BY f.name), ''),
+			p.name,
+			p.description,
+			COALESCE(p.owner_user_id::text, ''),
+			p.visibility,
+			COALESCE(pr.revision, 0),
+			COALESCE(pr.config_hash, ''),
+			to_char(p.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+		FROM profiles p
+		LEFT JOIN profile_fleets pf ON pf.profile_id = p.id
+		LEFT JOIN fleets f ON f.id = pf.fleet_id
+		LEFT JOIN LATERAL (
+			SELECT
+				revision,
+				config_hash
+			FROM profile_revisions
+			WHERE profile_id = p.id
+			ORDER BY revision DESC
+			LIMIT 1
+		) pr ON true
+		WHERE p.owner_user_id::text = $1
+		   OR p.visibility = $2
+		GROUP BY p.id, p.name, p.description, p.owner_user_id, p.visibility, pr.revision, pr.config_hash, p.created_at
+		ORDER BY p.created_at DESC, p.name ASC
+	`, userID, VisibilityVisible)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list profiles for user: %w", err)
+	}
+
+	defer rows.Close()
+
+	profiles := make([]Profile, 0)
+	for rows.Next() {
+		var item Profile
+		var fleetIDsCSV string
+
+		if err := rows.Scan(
+			&item.ID,
+			&fleetIDsCSV,
+			&item.FleetName,
+			&item.Name,
+			&item.Description,
+			&item.OwnerUserID,
+			&item.Visibility,
+			&item.LatestRevision,
+			&item.ConfigHash,
+			&item.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan profile for user: %w", err)
+		}
+
+		item.FleetIDs = splitCommaSeparatedValues(fleetIDsCSV)
+		if len(item.FleetIDs) > 0 {
+			item.FleetID = item.FleetIDs[0]
+		}
+
+		profiles = append(profiles, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed during profile rows iteration for user: %w", err)
+	}
+
+	return profiles, nil
+}
+
+func UserCanViewProfile(ctx context.Context, userID string, isAdmin bool, profileID string) (bool, error) {
+	p := GetPool()
+	if p == nil {
+		return false, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return false, ErrProfileNotFound
+	}
+
+	var canView bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM profiles
+			WHERE id::text = $1
+			  AND ($2 OR owner_user_id::text = $3 OR visibility = $4)
+		)
+	`, profileID, isAdmin, userID, VisibilityVisible).Scan(&canView)
+	if err != nil {
+		return false, fmt.Errorf("failed to validate profile access: %w", err)
+	}
+
+	return canView, nil
+}
+
+func UserCanManageProfile(ctx context.Context, userID string, isAdmin bool, profileID string) (bool, error) {
+	p := GetPool()
+	if p == nil {
+		return false, ErrDatabaseConnectionNotInitialized
+	}
+
+	userID = strings.TrimSpace(userID)
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return false, ErrProfileNotFound
+	}
+
+	var canManage bool
+	err := p.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM profiles
+			WHERE id::text = $1
+			  AND ($2 OR owner_user_id::text = $3)
+		)
+	`, profileID, isAdmin, userID).Scan(&canManage)
+	if err != nil {
+		return false, fmt.Errorf("failed to validate profile management access: %w", err)
+	}
+
+	return canManage, nil
+}
+
+func SetProfileVisibility(ctx context.Context, profileID, visibility string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return ErrProfileNotFound
+	}
+
+	normalizedVisibility, err := normalizeVisibility(visibility)
+	if err != nil {
+		return err
+	}
+
+	result, err := p.Exec(ctx, `
+		UPDATE profiles
+		SET visibility = $2
+		WHERE id::text = $1
+	`, profileID, normalizedVisibility)
+	if err != nil {
+		return fmt.Errorf("failed to update profile visibility: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrProfileNotFound
+	}
+
+	return nil
+}
+
 func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, error) {
 	p := GetPool()
 	if p == nil {
@@ -430,10 +758,12 @@ func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, erro
 			pr.id::text,
 			pr.name,
 			pr.description,
+			COALESCE(pr.owner_user_id::text, ''),
+			pr.visibility,
 			to_char(pr.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 		FROM profiles pr
 		WHERE pr.id::text = $1
-	`, profileID).Scan(&item.ID, &item.Name, &item.Description, &item.CreatedAt)
+	`, profileID).Scan(&item.ID, &item.Name, &item.Description, &item.OwnerUserID, &item.Visibility, &item.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ProfileEdit{}, ErrProfileNotFound
 	}
@@ -483,7 +813,7 @@ func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, erro
 	return item, nil
 }
 
-func CreateProfile(ctx context.Context, input CreateProfileInput) error {
+func CreateProfile(ctx context.Context, input CreateProfileInput, ownerUserID string) error {
 	p := GetPool()
 	if p == nil {
 		return ErrDatabaseConnectionNotInitialized
@@ -493,6 +823,12 @@ func CreateProfile(ctx context.Context, input CreateProfileInput) error {
 	input.FleetIDs = normalizeFleetIDs(input.FleetIDs)
 	input.Description = strings.TrimSpace(input.Description)
 	input.RawNix = strings.TrimSpace(input.RawNix)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+
+	var owner any
+	if ownerUserID != "" {
+		owner = ownerUserID
+	}
 
 	if input.Name == "" {
 		return ErrNameRequired
@@ -531,10 +867,10 @@ func CreateProfile(ctx context.Context, input CreateProfileInput) error {
 	var profileID string
 
 	err = tx.QueryRow(ctx, `
-		INSERT INTO profiles (name, description, fleet_id)
-		VALUES ($1, $2, $3::uuid)
+		INSERT INTO profiles (name, description, fleet_id, owner_user_id, visibility)
+		VALUES ($1, $2, $3::uuid, $4, $5)
 		RETURNING id::text
-	`, input.Name, input.Description, primaryFleetID).Scan(&profileID)
+	`, input.Name, input.Description, primaryFleetID, owner, VisibilityPrivate).Scan(&profileID)
 	if uniqueViolation(err) {
 		return ErrProfileAlreadyExists
 	}
@@ -2461,6 +2797,19 @@ func normalizeReleaseStatus(raw string) (string, error) {
 	return status, nil
 }
 
+func normalizeVisibility(raw string) (string, error) {
+	visibility := strings.ToLower(strings.TrimSpace(raw))
+	if visibility == "" {
+		return VisibilityPrivate, nil
+	}
+
+	if !containsString(validVisibilityValues(), visibility) {
+		return "", ErrInvalidVisibility
+	}
+
+	return visibility, nil
+}
+
 func validBuildStatuses() []string {
 	return []string{
 		BuildStatusQueued,
@@ -2513,6 +2862,13 @@ func validReleaseStatuses() []string {
 	return []string{
 		ReleaseStatusActive,
 		ReleaseStatusWithdrawn,
+	}
+}
+
+func validVisibilityValues() []string {
+	return []string{
+		VisibilityPrivate,
+		VisibilityVisible,
 	}
 }
 

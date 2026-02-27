@@ -1,0 +1,115 @@
+---
+import SiteTitle from 'virtual:starlight/components/SiteTitle';
+---
+
+<div class="header fleeti-header">
+	<div class="brand-wrap sl-flex">
+		<SiteTitle />
+	</div>
+
+	<nav class="main-nav" aria-label="Primary">
+		<a href="/" aria-current={Astro.url.pathname === '/' ? 'page' : undefined}>Docs</a>
+		<a href="/overview/" aria-current={Astro.url.pathname === '/overview/' ? 'page' : undefined}
+			>Overview</a
+		>
+		<a
+			href="/guides/example/"
+			aria-current={Astro.url.pathname.startsWith('/guides/') ? 'page' : undefined}>Guides</a
+		>
+	</nav>
+
+	<div class="header-actions">
+		<a class="login-btn" href="https://admin.fleeti.ae">Log in</a>
+	</div>
+</div>
+
+<style>
+	@layer starlight.core {
+		.fleeti-header {
+			display: grid;
+			grid-template-columns: auto 1fr auto;
+			align-items: center;
+			gap: 1rem;
+		}
+
+		.brand-wrap {
+			min-width: 0;
+		}
+
+		.main-nav {
+			display: none;
+			align-items: center;
+			justify-content: center;
+			gap: 0.5rem;
+		}
+
+		.main-nav a {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			height: 2.2rem;
+			padding: 0 0.9rem;
+			border-radius: 0.55rem;
+			border: 1px solid transparent;
+			font-size: 0.95rem;
+			font-weight: 600;
+			color: #35557a;
+			text-decoration: none;
+			transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease;
+		}
+
+		.main-nav a:hover {
+			background: #eaf2f9;
+			color: #0f5f8f;
+		}
+
+		.main-nav a[aria-current='page'] {
+			background: #ffffff;
+			border-color: #d3e3ef;
+			color: #0f5f8f;
+		}
+
+		.header-actions {
+			display: inline-flex;
+			justify-content: flex-end;
+		}
+
+		.login-btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			height: 2.4rem;
+			padding: 0 1rem;
+			border-radius: 0.55rem;
+			border: 1px solid #d3e3ef;
+			background: #ffffff;
+			color: #0f5f8f;
+			font-size: 0.95rem;
+			font-weight: 600;
+			line-height: 1;
+			text-decoration: none;
+			box-shadow: 0 8px 18px -14px rgba(9, 54, 83, 0.7);
+			transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+		}
+
+		.login-btn:hover {
+			background: #f0f8fd;
+			transform: translateY(-1px);
+			box-shadow: 0 12px 20px -13px rgba(9, 54, 83, 0.7);
+		}
+
+		@media (min-width: 50rem) {
+			.main-nav {
+				display: inline-flex;
+			}
+		}
+
+		@media (max-width: 30rem) {
+			.login-btn {
+				height: 2.2rem;
+				padding: 0 0.8rem;
+				font-size: 0.875rem;
+			}
+		}
+	}
+</style>

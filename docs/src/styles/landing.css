@@ -1,0 +1,139 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@layer starlight.base {
+	:root,
+	:root[data-theme='light'],
+	:root[data-theme='dark'] {
+		--sl-font: 'Space Grotesk';
+		--sl-font-mono: 'IBM Plex Mono';
+
+		--sl-color-accent-low: #dcecf8;
+		--sl-color-accent: #0f5f8f;
+		--sl-color-accent-high: #0a476a;
+
+		--sl-color-white: #112044;
+		--sl-color-gray-1: #1d2e4e;
+		--sl-color-gray-2: #435577;
+		--sl-color-gray-3: #687a9c;
+		--sl-color-gray-4: #93a3bf;
+		--sl-color-gray-5: #d3ddec;
+		--sl-color-gray-6: #eaf0f8;
+		--sl-color-gray-7: #f6f8fc;
+		--sl-color-black: #f8fafe;
+
+		--sl-color-blue-low: #dcecf8;
+		--sl-color-blue: #0f5f8f;
+		--sl-color-blue-high: #0a476a;
+
+		--sl-color-orange-low: #fff4df;
+		--sl-color-orange: #e5b46b;
+		--sl-color-orange-high: #7a4d00;
+
+		--sl-color-bg: #f6f8fc;
+		--sl-color-bg-nav: #0f5f8f;
+		--sl-color-bg-sidebar: #ffffff;
+		--sl-color-text: #3f4f76;
+		--sl-color-text-accent: #0f5f8f;
+		--sl-color-hairline: #e2eaf5;
+		--sl-color-hairline-light: #dce5f2;
+		--sl-color-hairline-shade: #0a476a;
+
+		--sl-shadow-sm: 0 1px 2px rgba(19, 32, 64, 0.06);
+		--sl-shadow-md: 0 10px 26px -20px rgba(21, 78, 113, 0.35);
+	}
+}
+
+@layer starlight.core {
+	:root[data-has-hero] {
+		--sl-content-width: 73rem;
+	}
+
+	:root[data-has-hero] body {
+		background:
+			radial-gradient(circle at 74% 8%, rgba(128, 181, 209, 0.28) 0%, transparent 30%),
+			radial-gradient(circle at 10% 26%, rgba(199, 220, 241, 0.35) 0%, transparent 39%),
+			#f6f8fc;
+	}
+
+	.header {
+		background-color: rgba(246, 248, 252, 0.9);
+		border-bottom-color: #d7e2f0;
+		backdrop-filter: blur(10px);
+	}
+
+	:root[data-has-hero] .main-pane {
+		width: 100%;
+	}
+
+	:root[data-has-hero] .content-panel .sl-container {
+		margin-inline: auto !important;
+	}
+
+	.fleeti-header .site-title {
+		font-size: 1.85rem;
+		font-weight: 700;
+		letter-spacing: -0.02em;
+		color: #0f2149;
+	}
+
+	:root[data-has-hero] .sl-markdown-content h2 {
+		font-size: clamp(1.45rem, 2vw, 1.8rem);
+		color: #112044;
+	}
+
+	:root[data-has-hero] .card-grid {
+		margin-top: 0.9rem;
+	}
+
+	:root[data-has-hero] .card-grid .card {
+		border: 1px solid #d5e1ee;
+		border-radius: 1rem;
+		background: #ffffff;
+		box-shadow: 0 20px 40px -34px rgba(10, 71, 106, 0.44);
+		animation: card-rise 480ms ease both;
+	}
+
+	:root[data-has-hero] .card-grid .card:nth-child(2) {
+		animation-delay: 80ms;
+	}
+
+	:root[data-has-hero] .card-grid .card:nth-child(3) {
+		animation-delay: 140ms;
+	}
+
+	:root[data-has-hero] .card-grid .card:nth-child(4) {
+		animation-delay: 200ms;
+	}
+
+	:root[data-has-hero] .card-grid .card .title {
+		color: #162752;
+	}
+
+	.starlight-aside--caution {
+		background-color: #fff4df;
+		border-inline-start-color: #e5b46b;
+		color: #7a4d00;
+	}
+
+	.starlight-aside--caution .starlight-aside__title,
+	.starlight-aside--caution .starlight-aside__content a {
+		color: #7a4d00;
+	}
+
+	@keyframes card-rise {
+		from {
+			opacity: 0;
+			transform: translateY(14px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@media (max-width: 50rem) {
+		.fleeti-header .site-title {
+			font-size: 1.5rem;
+		}
+	}
+}

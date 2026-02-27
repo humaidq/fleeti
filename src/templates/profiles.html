@@ -23,6 +23,7 @@
             <div class="list-card-title">{{ .Name }}</div>
             <div class="list-card-meta profile-list-meta">
               <span class="muted-text">Primary fleet: {{ if .FleetName }}{{ .FleetName }}{{ else }}-{{ end }}</span>
+              <span class="muted-text">Visibility: {{ if eq .Visibility "visible" }}visible{{ else }}private{{ end }}</span>
               <span class="muted-text">Assigned fleets: {{ len .FleetIDs }}</span>
               <span class="muted-text">Latest revision: {{ if gt .LatestRevision 0 }}r{{ .LatestRevision }}{{ else }}-{{ end }}</span>
               <span class="muted-text">Created (UTC): {{ .CreatedAt }}</span>

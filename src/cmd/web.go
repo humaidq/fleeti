@@ -194,6 +194,7 @@ func start(ctx context.Context, cmd *cli.Command) error {
 
 		f.Get("/fleets", routes.FleetsPage)
 		f.Post("/fleets", csrf.Validate, routes.CreateFleet)
+		f.Post("/fleets/{id}/visibility", csrf.Validate, routes.UpdateFleetVisibility)
 		f.Post("/fleets/{id}/delete", csrf.Validate, routes.DeleteFleet)
 
 		f.Get("/profiles", routes.ProfilesPage)
@@ -209,6 +210,7 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Get("/profiles/{id}/raw-nix", routes.ProfileRawNixPage)
 		f.Post("/profiles/{id}/raw-nix", csrf.Validate, routes.UpdateProfileRawNix)
 		f.Post("/profiles/{id}/edit", csrf.Validate, routes.UpdateProfile)
+		f.Post("/profiles/{id}/visibility", csrf.Validate, routes.UpdateProfileVisibility)
 		f.Post("/profiles/{id}/delete", csrf.Validate, routes.DeleteProfile)
 
 		f.Get("/builds", routes.BuildsPage)

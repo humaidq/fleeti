@@ -57,11 +57,22 @@ func Dashboard(c flamego.Context, t template.Template, data template.Data) {
 }
 
 // FleetsPage renders fleets list and create form.
-func FleetsPage(c flamego.Context, t template.Template, data template.Data) {
+func FleetsPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Fleets")
 	data["IsFleets"] = true
 
-	fleets, err := db.ListFleets(c.Request().Context())
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		logger.Error("failed to resolve session user for fleets", "error", err)
+		setPageErrorFlash(data, "Failed to load fleets")
+		data["Fleets"] = []db.Fleet{}
+
+		t.HTML(http.StatusOK, "fleets")
+
+		return
+	}
+
+	fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list fleets", "error", err)
 		setPageErrorFlash(data, "Failed to load fleets")
@@ -69,12 +80,20 @@ func FleetsPage(c flamego.Context, t template.Template, data template.Data) {
 	}
 
 	data["Fleets"] = fleets
+	data["ManageableFleetIDs"] = manageableFleetMap(user, fleets)
 
 	t.HTML(http.StatusOK, "fleets")
 }
 
 // CreateFleet handles fleet creation.
 func CreateFleet(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
 	if err := c.Request().ParseForm(); err != nil {
 		redirectWithMessage(c, s, "/fleets", FlashError, "Failed to parse form")
 
@@ -84,7 +103,7 @@ func CreateFleet(c flamego.Context, s session.Session) {
 	name := strings.TrimSpace(c.Request().Form.Get("name"))
 	description := strings.TrimSpace(c.Request().Form.Get("description"))
 
-	if err := db.CreateFleet(c.Request().Context(), name, description); err != nil {
+	if err := db.CreateFleet(c.Request().Context(), name, description, user.ID.String()); err != nil {
 		handleMutationError(c, s, "/fleets", err)
 
 		return
@@ -95,9 +114,29 @@ func CreateFleet(c flamego.Context, s session.Session) {
 
 // DeleteFleet permanently deletes a fleet and all dependent records.
 func DeleteFleet(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
 	fleetID := strings.TrimSpace(c.Param("id"))
 	if fleetID == "" {
 		handleMutationError(c, s, "/fleets", db.ErrFleetRequired)
+
+		return
+	}
+
+	canManage, err := db.UserCanManageFleet(c.Request().Context(), user.ID.String(), user.IsAdmin, fleetID)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
 
 		return
 	}
@@ -111,12 +150,61 @@ func DeleteFleet(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet permanently deleted")
 }
 
+// UpdateFleetVisibility updates fleet visibility (admin only).
+func UpdateFleetVisibility(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/fleets", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/fleets", db.ErrAdminRequired)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, "/fleets", FlashError, "Failed to parse form")
+
+		return
+	}
+
+	fleetID := strings.TrimSpace(c.Param("id"))
+	if fleetID == "" {
+		handleMutationError(c, s, "/fleets", db.ErrFleetRequired)
+
+		return
+	}
+
+	visibility := strings.TrimSpace(c.Request().Form.Get("visibility"))
+	if err := db.SetFleetVisibility(c.Request().Context(), fleetID, visibility); err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet visibility updated")
+}
+
 // ProfilesPage renders the profiles list.
-func ProfilesPage(c flamego.Context, t template.Template, data template.Data) {
+func ProfilesPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Profiles")
 	data["IsProfiles"] = true
 
-	profiles, err := db.ListProfiles(c.Request().Context())
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		logger.Error("failed to resolve session user for profiles", "error", err)
+		setPageErrorFlash(data, "Failed to load profiles")
+		data["Profiles"] = []db.Profile{}
+
+		t.HTML(http.StatusOK, "profiles")
+
+		return
+	}
+
+	profiles, err := db.ListProfilesForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list profiles", "error", err)
 		setPageErrorFlash(data, "Failed to load profiles")
@@ -129,11 +217,22 @@ func ProfilesPage(c flamego.Context, t template.Template, data template.Data) {
 }
 
 // NewProfilePage renders the profile create form.
-func NewProfilePage(c flamego.Context, t template.Template, data template.Data) {
+func NewProfilePage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Create Profile")
 	data["IsProfiles"] = true
 
-	fleets, err := db.ListFleets(c.Request().Context())
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		logger.Error("failed to resolve session user for profile form", "error", err)
+		setPageErrorFlash(data, "Failed to load fleets")
+		data["Fleets"] = []db.Fleet{}
+
+		t.HTML(http.StatusOK, "profile_new")
+
+		return
+	}
+
+	fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list fleets for profile form", "error", err)
 		setPageErrorFlash(data, "Failed to load fleets")
@@ -141,13 +240,20 @@ func NewProfilePage(c flamego.Context, t template.Template, data template.Data) 
 		fleets = []db.Fleet{}
 	}
 
-	data["Fleets"] = fleets
+	data["Fleets"] = manageableFleetsForUser(user, fleets)
 
 	t.HTML(http.StatusOK, "profile_new")
 }
 
 // AddProfilePackage handles package additions for profile package management.
 func AddProfilePackage(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -185,6 +291,12 @@ func AddProfilePackage(c flamego.Context, s session.Session) {
 		}
 
 		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
 
 		return
 	}
@@ -235,6 +347,13 @@ func AddProfilePackage(c flamego.Context, s session.Session) {
 
 // RemoveProfilePackage handles package removal for profile package management.
 func RemoveProfilePackage(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -266,6 +385,12 @@ func RemoveProfilePackage(c flamego.Context, s session.Session) {
 		}
 
 		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
 
 		return
 	}
@@ -326,6 +451,13 @@ func RemoveProfilePackage(c flamego.Context, s session.Session) {
 
 // CreateProfile handles profile creation.
 func CreateProfile(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles/new", db.ErrAccessDenied)
+
+		return
+	}
+
 	if err := c.Request().ParseForm(); err != nil {
 		redirectWithMessage(c, s, "/profiles/new", FlashError, "Failed to parse form")
 
@@ -339,7 +471,13 @@ func CreateProfile(c flamego.Context, s session.Session) {
 		ConfigJSON:  `{"packages":[]}`,
 	}
 
-	if err := db.CreateProfile(c.Request().Context(), input); err != nil {
+	if err := ensureUserCanManageFleetIDs(c.Request().Context(), user, input.FleetIDs); err != nil {
+		handleMutationError(c, s, "/profiles/new", err)
+
+		return
+	}
+
+	if err := db.CreateProfile(c.Request().Context(), input, user.ID.String()); err != nil {
 		handleMutationError(c, s, "/profiles/new", err)
 
 		return
@@ -353,6 +491,13 @@ func ProfilePage(c flamego.Context, s session.Session, t template.Template, data
 	setPage(data, "Profile Summary")
 	data["IsProfiles"] = true
 
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -363,6 +508,12 @@ func ProfilePage(c flamego.Context, s session.Session, t template.Template, data
 	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
 	if err != nil {
 		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canViewProfile(user, profile) {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
 
 		return
 	}
@@ -387,6 +538,7 @@ func ProfilePage(c flamego.Context, s session.Session, t template.Template, data
 	data["KernelSummary"] = profileKernelSummary(kernelConfig)
 	data["HasRawNix"] = strings.TrimSpace(profile.RawNix) != ""
 	data["ProfileNavActive"] = "summary"
+	data["CanManageProfile"] = canManageProfile(user, profile)
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, ""))
 
 	t.HTML(http.StatusOK, "profile_view")
@@ -397,6 +549,13 @@ func EditProfilePage(c flamego.Context, s session.Session, t template.Template, 
 	setPage(data, "Profile Settings")
 	data["IsProfiles"] = true
 
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -411,7 +570,13 @@ func EditProfilePage(c flamego.Context, s session.Session, t template.Template, 
 		return
 	}
 
-	fleets, err := db.ListFleets(c.Request().Context())
+	if !canManageProfile(user, profile) {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	fleets, err := db.ListFleetsForUser(c.Request().Context(), user.ID.String(), user.IsAdmin)
 	if err != nil {
 		logger.Error("failed to list fleets for profile settings form", "profile_id", profileID, "error", err)
 		setPageErrorFlash(data, "Failed to load fleets")
@@ -419,9 +584,10 @@ func EditProfilePage(c flamego.Context, s session.Session, t template.Template, 
 	}
 
 	data["Profile"] = profile
-	data["Fleets"] = fleets
+	data["Fleets"] = manageableFleetsForUser(user, fleets)
 	data["SelectedFleetIDs"] = fleetSelectionMap(profile.FleetIDs)
 	data["ProfileNavActive"] = "settings"
+	data["CanManageProfile"] = true
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Settings"))
 
 	t.HTML(http.StatusOK, "profile_edit")
@@ -432,6 +598,13 @@ func ProfilePackagesPage(c flamego.Context, s session.Session, t template.Templa
 	setPage(data, "Profile Packages")
 	data["IsProfiles"] = true
 
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -442,6 +615,12 @@ func ProfilePackagesPage(c flamego.Context, s session.Session, t template.Templa
 	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
 	if err != nil {
 		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
 
 		return
 	}
@@ -456,6 +635,7 @@ func ProfilePackagesPage(c flamego.Context, s session.Session, t template.Templa
 	data["Profile"] = profile
 	data["Packages"] = packages
 	data["ProfileNavActive"] = "packages"
+	data["CanManageProfile"] = true
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Packages"))
 
 	searchQuery := strings.TrimSpace(c.Request().URL.Query().Get("q"))
@@ -489,6 +669,13 @@ func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template
 	setPage(data, "Profile Kernel")
 	data["IsProfiles"] = true
 
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -499,6 +686,12 @@ func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template
 	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
 	if err != nil {
 		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
 
 		return
 	}
@@ -527,6 +720,7 @@ func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template
 	data["KernelSourceRef"] = kernelConfig.SourceOverride.Ref
 	data["KernelSourceRev"] = kernelConfig.SourceOverride.Rev
 	data["ProfileNavActive"] = "kernel"
+	data["CanManageProfile"] = true
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Kernel"))
 
 	t.HTML(http.StatusOK, "profile_kernel")
@@ -536,6 +730,13 @@ func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template
 func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Profile Raw Nix")
 	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
 
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
@@ -551,8 +752,15 @@ func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template
 		return
 	}
 
+	if !canManageProfile(user, profile) {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
 	data["Profile"] = profile
 	data["ProfileNavActive"] = "raw_nix"
+	data["CanManageProfile"] = true
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Raw Nix"))
 
 	t.HTML(http.StatusOK, "profile_raw_nix")
@@ -560,6 +768,13 @@ func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template
 
 // UpdateProfile handles profile settings updates.
 func UpdateProfile(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -586,6 +801,12 @@ func UpdateProfile(c flamego.Context, s session.Session) {
 		return
 	}
 
+	if !canManageProfile(user, profile) {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	input := db.CreateProfileInput{
 		FleetIDs:            selectedFleetIDsFromForm(c.Request().Form),
 		Name:                strings.TrimSpace(c.Request().Form.Get("name")),
@@ -593,6 +814,12 @@ func UpdateProfile(c flamego.Context, s session.Session) {
 		ConfigJSON:          profile.ConfigJSON,
 		RawNix:              profile.RawNix,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
+	}
+
+	if err := ensureUserCanManageFleetIDs(c.Request().Context(), user, input.FleetIDs); err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
 	}
 
 	createdNewRevision, err := db.UpdateProfile(c.Request().Context(), profileID, input)
@@ -614,8 +841,53 @@ func UpdateProfile(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, path, FlashSuccess, message)
 }
 
+// UpdateProfileVisibility updates profile visibility (admin only).
+func UpdateProfileVisibility(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	if !user.IsAdmin {
+		handleMutationError(c, s, "/profiles", db.ErrAdminRequired)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, profileEditPath(profileID), FlashError, "Failed to parse form")
+
+		return
+	}
+
+	visibility := strings.TrimSpace(c.Request().Form.Get("visibility"))
+	if err := db.SetProfileVisibility(c.Request().Context(), profileID, visibility); err != nil {
+		handleMutationError(c, s, profileEditPath(profileID), err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, profileEditPath(profileID), FlashSuccess, "Profile visibility updated")
+}
+
 // UpdateProfileKernel handles profile kernel updates.
 func UpdateProfileKernel(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -638,6 +910,12 @@ func UpdateProfileKernel(c flamego.Context, s session.Session) {
 		}
 
 		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
 
 		return
 	}
@@ -699,6 +977,13 @@ func UpdateProfileKernel(c flamego.Context, s session.Session) {
 
 // UpdateProfileRawNix handles profile raw nix updates.
 func UpdateProfileRawNix(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
@@ -721,6 +1006,12 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 		}
 
 		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManageProfile(user, profile) {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
 
 		return
 	}
@@ -755,9 +1046,29 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 
 // DeleteProfile permanently deletes a profile and dependent builds/releases/rollouts.
 func DeleteProfile(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
 	profileID := strings.TrimSpace(c.Param("id"))
 	if profileID == "" {
 		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
 
 		return
 	}
@@ -1748,6 +2059,10 @@ func mutationErrorMessage(err error) string {
 	switch {
 	case errors.Is(err, db.ErrNameRequired):
 		return "Name is required"
+	case errors.Is(err, db.ErrAccessDenied):
+		return "Access restricted"
+	case errors.Is(err, db.ErrAdminRequired):
+		return "Admin permissions required"
 	case errors.Is(err, db.ErrProfileRequired):
 		return "Profile is required"
 	case errors.Is(err, db.ErrBuildRequired):
@@ -1802,6 +2117,8 @@ func mutationErrorMessage(err error) string {
 		return "Profile config JSON must be an object"
 	case errors.Is(err, db.ErrInvalidConfigSchemaVersion):
 		return "Config schema version must be a positive number"
+	case errors.Is(err, db.ErrInvalidVisibility):
+		return "Visibility must be private or visible"
 	case errors.Is(err, db.ErrBuildVersionAlreadyExists):
 		return "Build version already exists for this profile and fleet"
 	case errors.Is(err, db.ErrReleaseVersionAlreadyExists):

@@ -16,10 +16,12 @@
 <div class="page-header">
   <h2>Profile Summary</h2>
   <div class="page-header-actions">
+    {{ if .CanManageProfile }}
     <form method="post" action="/profiles/{{ .Profile.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this profile and all associated builds, releases, and rollouts? This cannot be undone.');">
       <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn btn-danger">Delete Permanently</button>
     </form>
+    {{ end }}
     <a href="/profiles" class="btn">Back to Profiles</a>
   </div>
 </div>
@@ -30,6 +32,7 @@
     Current revision: r{{ .Profile.LatestRevision }}
     {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
   </p>
+  <p class="muted-text">Visibility: {{ if eq .Profile.Visibility "visible" }}visible{{ else }}private{{ end }}</p>
   <p class="muted-text">Created (UTC): {{ .Profile.CreatedAt }}</p>
   {{ if .Profile.Description }}
   <p>{{ .Profile.Description }}</p>
@@ -41,6 +44,7 @@
 
 <section class="section-card">
   <h3>Configuration Overview</h3>
+  {{ if .CanManageProfile }}
   <div class="list-card-list">
     <div class="list-card profile-section-card">
       <div class="profile-section-card-header">
@@ -79,6 +83,9 @@
       </div>
     </div>
   </div>
+  {{ else }}
+  <p class="muted-text">This profile is visible in read-only mode.</p>
+  {{ end }}
 </section>
 
 {{ if .Packages }}
