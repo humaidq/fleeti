@@ -8,7 +8,9 @@
     <br />
     Manage profiles, builds, devices, and rollouts.
   </p>
-  <form method="POST" action="/logout" class="hidden" data-dashboard-logout-form></form>
+  <form method="POST" action="/logout" class="hidden" data-dashboard-logout-form>
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+  </form>
 
   <section class="section-card dashboard-quickstart">
     <h3>Guided Deployment</h3>
@@ -143,16 +145,6 @@
 
     if (!logoutLink || !logoutForm) {
       return;
-    }
-
-    var tokenMeta = document.querySelector('meta[name="csrf-token"]');
-    var csrfToken = tokenMeta ? tokenMeta.getAttribute("content") : "";
-    if (csrfToken) {
-      var csrfInput = document.createElement("input");
-      csrfInput.type = "hidden";
-      csrfInput.name = "_csrf";
-      csrfInput.value = csrfToken;
-      logoutForm.appendChild(csrfInput);
     }
 
     logoutLink.addEventListener("click", function(event) {

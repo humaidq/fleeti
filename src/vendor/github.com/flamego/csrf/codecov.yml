@@ -1,0 +1,10 @@
+coverage:
+  range: "60...95"
+  status:
+    project:
+      default:
+        threshold: 1%
+        informational: true
+
+comment:
+  layout: 'diff'

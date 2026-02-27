@@ -317,6 +317,8 @@ func copyEmbeddedNixOSWorkspace(destinationDir string) error {
 				mode = 0o750
 			}
 
+			mode = ensureOwnerWritableMode(mode, true)
+
 			if err := os.MkdirAll(targetPath, mode); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", currentPath, err)
 			}
@@ -341,6 +343,8 @@ func copyEmbeddedNixOSWorkspace(destinationDir string) error {
 		if mode == 0 {
 			mode = 0o640
 		}
+
+		mode = ensureOwnerWritableMode(mode, false)
 
 		if err := os.WriteFile(targetPath, contents, mode); err != nil {
 			return fmt.Errorf("failed to write embedded file %s: %w", currentPath, err)
@@ -432,6 +436,16 @@ func shouldSkipWorkspaceEntry(relPath string, entry fs.DirEntry) bool {
 	}
 
 	return false
+}
+
+func ensureOwnerWritableMode(mode fs.FileMode, isDir bool) fs.FileMode {
+	mode |= 0o200
+
+	if isDir {
+		mode |= 0o100
+	}
+
+	return mode
 }
 
 func runNixBuildCommand(ctx context.Context, buildID, workspaceNixOSDir, buildTarget string, installerLogs bool) error {

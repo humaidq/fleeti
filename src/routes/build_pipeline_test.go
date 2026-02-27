@@ -111,6 +111,22 @@ func TestCollectInstallerArtifactsFailsOnDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestCopyEmbeddedNixOSWorkspaceMakesOverridesWritable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	destinationDir := filepath.Join(root, "nixos")
+
+	if err := copyEmbeddedNixOSWorkspace(destinationDir); err != nil {
+		t.Fatalf("copyEmbeddedNixOSWorkspace returned error: %v", err)
+	}
+
+	overridesPath := filepath.Join(destinationDir, "modules", "build-overrides.nix")
+	if err := os.WriteFile(overridesPath, []byte("{ }\n"), 0o640); err != nil {
+		t.Fatalf("expected copied build-overrides.nix to be writable, got: %v", err)
+	}
+}
+
 func TestWriteBuildOverridesModuleSetsKernelPackages(t *testing.T) {
 	t.Parallel()
 

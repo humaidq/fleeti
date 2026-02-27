@@ -17,6 +17,7 @@ Set the required variables:
 export DATABASE_URL='postgres://user:pass@localhost:5432/fleeti?sslmode=disable'
 export WEBAUTHN_RP_ID='localhost'
 export WEBAUTHN_RP_ORIGINS='http://localhost:8080'
+export CSRF_SECRET='replace-with-a-random-secret'
 export BOOTSTRAP_TOKEN='replace-with-a-random-secret'
 ```
 

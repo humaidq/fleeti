@@ -33,6 +33,7 @@
 <section class="section-card">
   <h3>Raw Nix</h3>
   <form method="post" action="/profiles/{{ .Profile.ID }}/raw-nix">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-raw-nix">Raw Nix (Optional Escape Hatch)</label>
       <textarea id="profile-raw-nix" name="raw_nix" class="form-item" rows="16" placeholder="{ config, pkgs, ... }: { }">{{ .Profile.RawNix }}</textarea>

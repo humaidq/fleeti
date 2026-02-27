@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/flamego/csrf"
 	"github.com/flamego/flamego"
 	"github.com/flamego/session"
 	flamegoTemplate "github.com/flamego/template"
@@ -48,6 +49,11 @@ func start(ctx context.Context, cmd *cli.Command) error {
 	databaseURL := cmd.String("database-url")
 	if databaseURL == "" {
 		return errDatabaseURLRequired
+	}
+
+	csrfSecret := os.Getenv("CSRF_SECRET")
+	if csrfSecret == "" {
+		return errCSRFSecretRequired
 	}
 
 	if err := os.Setenv("DATABASE_URL", databaseURL); err != nil {
@@ -108,6 +114,7 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		},
 	}))
 	f.Use(routes.RequestLogger)
+	f.Use(csrf.Csrfer(csrf.Options{Secret: csrfSecret}))
 	f.Use(routes.NoCacheHeaders())
 
 	fs, err := flamegoTemplate.EmbedFS(templates.Templates, ".", []string{".html"})
@@ -118,11 +125,15 @@ func start(ctx context.Context, cmd *cli.Command) error {
 	f.Use(flamegoTemplate.Templater(flamegoTemplate.Options{
 		FileSystem: fs,
 	}))
+	appVersion := BuildDisplayVersion()
 	f.Use(func(data flamegoTemplate.Data, flash session.Flash) {
+		data["AppVersion"] = appVersion
+
 		if msg, ok := flash.(routes.FlashMessage); ok {
 			data["Flash"] = msg
 		}
 	})
+	f.Use(routes.CSRFInjector())
 	f.Use(routes.UserContextInjector())
 
 	f.Use(flamego.Static(flamego.StaticOptions{
@@ -153,13 +164,13 @@ func start(ctx context.Context, cmd *cli.Command) error {
 
 	f.Get("/login", routes.LoginForm)
 	f.Get("/setup", routes.SetupForm)
-	f.Post("/webauthn/login/start", routes.PasskeyLoginStart)
-	f.Post("/webauthn/login/finish", routes.PasskeyLoginFinish)
-	f.Post("/webauthn/setup/start", routes.SetupStart)
-	f.Post("/webauthn/setup/finish", routes.SetupFinish)
+	f.Post("/webauthn/login/start", csrf.Validate, routes.PasskeyLoginStart)
+	f.Post("/webauthn/login/finish", csrf.Validate, routes.PasskeyLoginFinish)
+	f.Post("/webauthn/setup/start", csrf.Validate, routes.SetupStart)
+	f.Post("/webauthn/setup/finish", csrf.Validate, routes.SetupFinish)
 
 	f.Group("", func() {
-		f.Post("/logout", routes.Logout)
+		f.Post("/logout", csrf.Validate, routes.Logout)
 
 		f.Get("/", routes.Dashboard)
 		f.Get("/deployments/wizard", routes.DeploymentWizardPage)
@@ -167,57 +178,62 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Get("/deployments/wizard/restart/fleet", routes.DeploymentWizardRestartFromFleet)
 		f.Get("/deployments/wizard/restart/profile", routes.DeploymentWizardRestartFromProfile)
 		f.Get("/deployments/wizard/restart/build", routes.DeploymentWizardRestartFromBuild)
-		f.Post("/deployments/wizard/fleet", routes.DeploymentWizardFleet)
-		f.Post("/deployments/wizard/profile", routes.DeploymentWizardProfile)
-		f.Post("/deployments/wizard/build", routes.DeploymentWizardBuild)
-		f.Post("/deployments/wizard/release", routes.DeploymentWizardRelease)
-		f.Post("/deployments/wizard/rollout", routes.DeploymentWizardRollout)
+		f.Post("/deployments/wizard/fleet", csrf.Validate, routes.DeploymentWizardFleet)
+		f.Post("/deployments/wizard/profile", csrf.Validate, routes.DeploymentWizardProfile)
+		f.Post("/deployments/wizard/build", csrf.Validate, routes.DeploymentWizardBuild)
+		f.Post("/deployments/wizard/release", csrf.Validate, routes.DeploymentWizardRelease)
+		f.Post("/deployments/wizard/rollout", csrf.Validate, routes.DeploymentWizardRollout)
 
 		f.Get("/security", routes.Security)
-		f.Post("/webauthn/passkey/start", routes.PasskeyRegistrationStart)
-		f.Post("/webauthn/passkey/finish", routes.PasskeyRegistrationFinish)
-		f.Post("/security/passkeys/{id}/delete", routes.DeletePasskey)
-		f.Post("/security/invites", routes.CreateUserInvite)
-		f.Post("/security/invites/{id}/regenerate", routes.RegenerateUserInvite)
-		f.Post("/security/invites/{id}/delete", routes.DeleteUserInvite)
+		f.Post("/webauthn/passkey/start", csrf.Validate, routes.PasskeyRegistrationStart)
+		f.Post("/webauthn/passkey/finish", csrf.Validate, routes.PasskeyRegistrationFinish)
+		f.Post("/security/passkeys/{id}/delete", csrf.Validate, routes.DeletePasskey)
+		f.Post("/security/invites", csrf.Validate, routes.CreateUserInvite)
+		f.Post("/security/invites/{id}/regenerate", csrf.Validate, routes.RegenerateUserInvite)
+		f.Post("/security/invites/{id}/delete", csrf.Validate, routes.DeleteUserInvite)
 
 		f.Get("/fleets", routes.FleetsPage)
-		f.Post("/fleets", routes.CreateFleet)
+		f.Post("/fleets", csrf.Validate, routes.CreateFleet)
+		f.Post("/fleets/{id}/delete", csrf.Validate, routes.DeleteFleet)
 
 		f.Get("/profiles", routes.ProfilesPage)
 		f.Get("/profiles/new", routes.NewProfilePage)
-		f.Post("/profiles", routes.CreateProfile)
+		f.Post("/profiles", csrf.Validate, routes.CreateProfile)
 		f.Get("/profiles/{id}", routes.ProfilePage)
 		f.Get("/profiles/{id}/edit", routes.EditProfilePage)
 		f.Get("/profiles/{id}/packages", routes.ProfilePackagesPage)
-		f.Post("/profiles/{id}/packages", routes.AddProfilePackage)
-		f.Post("/profiles/{id}/packages/remove", routes.RemoveProfilePackage)
+		f.Post("/profiles/{id}/packages", csrf.Validate, routes.AddProfilePackage)
+		f.Post("/profiles/{id}/packages/remove", csrf.Validate, routes.RemoveProfilePackage)
 		f.Get("/profiles/{id}/kernel", routes.ProfileKernelPage)
-		f.Post("/profiles/{id}/kernel", routes.UpdateProfileKernel)
+		f.Post("/profiles/{id}/kernel", csrf.Validate, routes.UpdateProfileKernel)
 		f.Get("/profiles/{id}/raw-nix", routes.ProfileRawNixPage)
-		f.Post("/profiles/{id}/raw-nix", routes.UpdateProfileRawNix)
-		f.Post("/profiles/{id}/edit", routes.UpdateProfile)
+		f.Post("/profiles/{id}/raw-nix", csrf.Validate, routes.UpdateProfileRawNix)
+		f.Post("/profiles/{id}/edit", csrf.Validate, routes.UpdateProfile)
+		f.Post("/profiles/{id}/delete", csrf.Validate, routes.DeleteProfile)
 
 		f.Get("/builds", routes.BuildsPage)
-		f.Post("/builds", routes.CreateBuild)
+		f.Post("/builds", csrf.Validate, routes.CreateBuild)
 		f.Get("/builds/{id}", routes.BuildPage)
-		f.Post("/builds/{id}/installer", routes.CreateBuildInstaller)
+		f.Post("/builds/{id}/installer", csrf.Validate, routes.CreateBuildInstaller)
 		f.Get("/builds/{id}/installer/logs", routes.BuildInstallerLogPage)
 		f.Get("/builds/{id}/installer/logs/live", routes.BuildInstallerLogLive)
 		f.Get("/builds/{id}/logs", routes.BuildLogPage)
 		f.Get("/builds/{id}/logs/live", routes.BuildLogLive)
+		f.Post("/builds/{id}/delete", csrf.Validate, routes.DeleteBuild)
 
 		f.Get("/releases", routes.ReleasesPage)
-		f.Post("/releases", routes.CreateRelease)
+		f.Post("/releases", csrf.Validate, routes.CreateRelease)
 		f.Get("/releases/{id}", routes.ReleasePage)
-		f.Post("/releases/{id}/withdraw", routes.WithdrawRelease)
+		f.Post("/releases/{id}/withdraw", csrf.Validate, routes.WithdrawRelease)
+		f.Post("/releases/{id}/delete", csrf.Validate, routes.DeleteRelease)
 
 		f.Get("/devices", routes.DevicesPage)
-		f.Post("/devices", routes.CreateDevice)
+		f.Post("/devices", csrf.Validate, routes.CreateDevice)
 
 		f.Get("/rollouts", routes.RolloutsPage)
-		f.Post("/rollouts", routes.CreateRollout)
+		f.Post("/rollouts", csrf.Validate, routes.CreateRollout)
 		f.Get("/rollouts/{id}", routes.RolloutPage)
+		f.Post("/rollouts/{id}/delete", csrf.Validate, routes.DeleteRollout)
 	}, routes.RequireAuth)
 
 	port := cmd.String("port")

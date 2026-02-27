@@ -16,6 +16,10 @@
 <div class="page-header">
   <h2>Profile Summary</h2>
   <div class="page-header-actions">
+    <form method="post" action="/profiles/{{ .Profile.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this profile and all associated builds, releases, and rollouts? This cannot be undone.');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn btn-danger">Delete Permanently</button>
+    </form>
     <a href="/profiles" class="btn">Back to Profiles</a>
   </div>
 </div>

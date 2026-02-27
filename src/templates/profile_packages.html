@@ -89,6 +89,7 @@
             <span class="badge">Added</span>
             {{ else if .Addable }}
             <form method="post" action="/profiles/{{ $.Profile.ID }}/packages" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
               <input type="hidden" name="package" value="{{ .AttrName }}" />
               <input type="hidden" name="q" value="{{ $.PackageSearchQuery }}" />
               <button type="submit" class="btn package-add-btn" aria-label="Add {{ .AttrName }}">+</button>
@@ -127,6 +128,7 @@
           <td data-label="Package"><code>{{ . }}</code></td>
           <td data-label="Actions">
             <form method="post" action="/profiles/{{ $.Profile.ID }}/packages/remove" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
               <input type="hidden" name="package" value="{{ . }}" />
               <input type="hidden" name="q" value="{{ $.PackageSearchQuery }}" />
               <button type="submit" class="btn">Remove</button>

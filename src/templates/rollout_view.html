@@ -16,6 +16,10 @@
 <div class="page-header">
   <h2>Rollout Summary</h2>
   <div class="page-header-actions">
+    <form method="post" action="/rollouts/{{ .Rollout.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this rollout? This cannot be undone.');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn btn-danger">Delete Permanently</button>
+    </form>
     {{ if .HasRelease }}
     <a href="/releases/{{ .Rollout.ReleaseID }}" class="btn">View Release</a>
     {{ end }}

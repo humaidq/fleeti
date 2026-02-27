@@ -12,6 +12,7 @@
   <details class="add-item-details">
     <summary class="add-item-summary">+ Create Fleet</summary>
     <form method="post" action="/fleets" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <div class="add-item-field">
         <label for="fleet-name">Name</label>
         <input id="fleet-name" name="name" class="form-item" required />
@@ -35,6 +36,7 @@
           <th>Name</th>
           <th>Description</th>
           <th>Created (UTC)</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -43,6 +45,12 @@
           <td><strong>{{ .Name }}</strong></td>
           <td>{{ if .Description }}{{ .Description }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
           <td>{{ .CreatedAt }}</td>
+          <td>
+            <form method="post" action="/fleets/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this fleet and all associated data? This cannot be undone.');">
+              <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+              <button type="submit" class="btn btn-danger">Delete Permanently</button>
+            </form>
+          </td>
         </tr>
       {{ end }}
       </tbody>

@@ -33,6 +33,7 @@
 <section class="section-card">
   <h3>Metadata</h3>
   <form method="post" action="/profiles/{{ .Profile.ID }}/edit">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-fleets">Fleets</label>
       <select id="profile-fleets" name="fleet_ids" class="form-item" multiple required>

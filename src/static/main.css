@@ -24,7 +24,7 @@ html {
 body {
   font-size: 1.1em;
   line-height: 1.4;
-  background-color: #edeee6;
+  background-color: #f1f3f4;
   max-width: 72rem;
   margin: 0 auto;
   color: #1c1c1c;
@@ -115,8 +115,13 @@ code {
 }
 
 .alert-yellow {
-  border-color: #ffc107;
-  background-color: #fff3cd;
+  border-color: #e5b46b;
+  background-color: #fff4df;
+}
+
+.alert-yellow .alert-title,
+.alert-yellow p {
+  color: #7a4d00;
 }
 
 .alert-red {
@@ -327,10 +332,10 @@ label {
 }
 
 .groundwave-header {
-  background-color: #134dae;
+  background-color: #0f5f8f;
   margin-top: 1rem;
   margin-bottom: 0.9rem;
-  border: 1px solid #0d3f89;
+  border: 1px solid #0a476a;
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -420,7 +425,7 @@ label {
 
 .nav-menu a.nav-active {
   background-color: #ffffff;
-  color: #134dae;
+  color: #0f5f8f;
   font-weight: 600;
 }
 
@@ -925,7 +930,7 @@ label {
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
-    background-color: #edeee6;
+    background-color: #f1f3f4;
     font-size: 1em;
   }
 
@@ -971,7 +976,7 @@ label {
     position: absolute;
     top: 0;
     left: 0;
-    background-color: #134dae;
+    background-color: #0f5f8f;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
     z-index: 999;
     gap: 0;

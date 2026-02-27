@@ -11,6 +11,7 @@
   <h2>Security</h2>
   <div class="page-header-actions">
     <form method="POST" action="/logout" class="inline-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn">Logout</button>
     </form>
   </div>
@@ -55,6 +56,7 @@
     {{ if gt $.PasskeyCount 1 }}
     <div class="list-card-meta">
       <form method="POST" action="/security/passkeys/{{ .ID }}/delete" class="inline-form">
+        <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
         <button type="submit" class="btn btn-danger">Delete</button>
       </form>
     </div>
@@ -79,6 +81,7 @@
 {{ end }}
 
 <form method="POST" action="/security/invites" class="form-group">
+  <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
   <label for="invite-display-name" class="item-title">Display name (optional)</label>
   <input type="text" id="invite-display-name" name="display_name" class="form-item" placeholder="Guest" />
   <p class="muted-text">Invites expire 24 hours after creation.</p>
@@ -99,6 +102,7 @@
     <div class="list-card-meta">
       <a href="{{ .SetupURL }}" class="btn" target="_blank" rel="noreferrer">Open setup link</a>
       <form method="POST" action="/security/invites/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Revoke this invite?');">
+        <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
         <button type="submit" class="btn btn-danger">Revoke</button>
       </form>
     </div>
@@ -121,9 +125,11 @@
     </div>
     <div class="list-card-meta">
       <form method="POST" action="/security/invites/{{ .ID }}/regenerate" class="inline-form" onsubmit="return confirm('Regenerate this invite link?');">
+        <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
         <button type="submit" class="btn">Regenerate link</button>
       </form>
       <form method="POST" action="/security/invites/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Delete this expired invite?');">
+        <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
         <button type="submit" class="btn btn-danger">Delete</button>
       </form>
     </div>

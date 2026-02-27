@@ -34,6 +34,7 @@
   {{ else }}
   <div class="wizard-grid-two">
     <form method="post" action="/deployments/wizard/fleet" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="select" />
       <div class="form-group">
         <label for="wizard-fleet-id">Use existing fleet</label>
@@ -48,6 +49,7 @@
     </form>
 
     <form method="post" action="/deployments/wizard/fleet" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="create" />
       <div class="form-group">
         <label for="wizard-fleet-name">Create new fleet</label>
@@ -81,6 +83,7 @@
   {{ else }}
   <div class="wizard-grid-two">
     <form method="post" action="/deployments/wizard/profile" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="select" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <div class="form-group">
@@ -96,6 +99,7 @@
     </form>
 
     <form method="post" action="/deployments/wizard/profile" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="create" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <div class="form-group">
@@ -135,6 +139,7 @@
   {{ else }}
   <div class="wizard-grid-two">
     <form method="post" action="/deployments/wizard/build" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="select" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
@@ -151,6 +156,7 @@
     </form>
 
     <form method="post" action="/deployments/wizard/build" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="create" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
@@ -186,6 +192,7 @@
   {{ if .WizardBuildReadyForRelease }}
   <div class="wizard-grid-two">
     <form method="post" action="/deployments/wizard/release" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="select" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
@@ -203,6 +210,7 @@
     </form>
 
     <form method="post" action="/deployments/wizard/release" class="wizard-form-block">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <input type="hidden" name="intent" value="create" />
       <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
       <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
@@ -249,6 +257,7 @@
     <p><strong>Target release:</strong> {{ .WizardSelectedReleaseVersion }}</p>
   </div>
   <form method="post" action="/deployments/wizard/rollout" class="wizard-rollout-form">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <input type="hidden" name="fleet_id" value="{{ .WizardFleetID }}" />
     <input type="hidden" name="profile_id" value="{{ .WizardProfileID }}" />
     <input type="hidden" name="build_id" value="{{ .WizardBuildID }}" />

@@ -20,21 +20,20 @@ import (
 // The syntax of a TPM Attestation statement is as follows:
 //
 // $$attStmtType // = (
+//                        fmt: "tpm",
+//                        attStmt: tpmStmtFormat
+//                    )
 //
-//	    fmt: "tpm",
-//	    attStmt: tpmStmtFormat
-//	)
-//
-//	tpmStmtFormat = {
-//	                    ver: "2.0",
-//	                    (
-//	                        alg: COSEAlgorithmIdentifier,
-//	                        x5c: [ aikCert: bytes, * (caCert: bytes) ]
-//	                    )
-//	                    sig: bytes,
-//	                    certInfo: bytes,
-//	                    pubArea: bytes
-//	                }
+// tpmStmtFormat = {
+//                     ver: "2.0",
+//                     (
+//                         alg: COSEAlgorithmIdentifier,
+//                         x5c: [ aikCert: bytes, * (caCert: bytes) ]
+//                     )
+//                     sig: bytes,
+//                     certInfo: bytes,
+//                     pubArea: bytes
+//                 }
 //
 // Specification: §8.3. TPM Attestation Statement Format
 //

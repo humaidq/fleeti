@@ -25,6 +25,7 @@ go run . migrate create add_new_table
 - `WEBAUTHN_RP_ID` (required): relying party ID for passkeys
 - `WEBAUTHN_RP_ORIGINS` (required): comma-separated allowed origins
 - `WEBAUTHN_RP_NAME` (optional): display name, defaults to `Fleeti`
+- `CSRF_SECRET` (required): secret used to sign CSRF tokens for POST requests
 - `BOOTSTRAP_TOKEN` (required for initial setup): token used in `/setup?token=...`
 
 ## Key endpoints

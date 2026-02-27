@@ -93,6 +93,24 @@ func CreateFleet(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet created")
 }
 
+// DeleteFleet permanently deletes a fleet and all dependent records.
+func DeleteFleet(c flamego.Context, s session.Session) {
+	fleetID := strings.TrimSpace(c.Param("id"))
+	if fleetID == "" {
+		handleMutationError(c, s, "/fleets", db.ErrFleetRequired)
+
+		return
+	}
+
+	if err := deleteFleetCascade(c.Request().Context(), fleetID); err != nil {
+		handleMutationError(c, s, "/fleets", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/fleets", FlashSuccess, "Fleet permanently deleted")
+}
+
 // ProfilesPage renders the profiles list.
 func ProfilesPage(c flamego.Context, t template.Template, data template.Data) {
 	setPage(data, "Profiles")
@@ -735,6 +753,24 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, path, FlashSuccess, message)
 }
 
+// DeleteProfile permanently deletes a profile and dependent builds/releases/rollouts.
+func DeleteProfile(c flamego.Context, s session.Session) {
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		handleMutationError(c, s, "/profiles", db.ErrProfileNotFound)
+
+		return
+	}
+
+	if err := deleteProfileCascade(c.Request().Context(), profileID); err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/profiles", FlashSuccess, "Profile permanently deleted")
+}
+
 // BuildsPage renders builds list and create form.
 func BuildsPage(c flamego.Context, t template.Template, data template.Data) {
 	setPage(data, "Builds")
@@ -860,6 +896,24 @@ func CreateBuildInstaller(c flamego.Context, s session.Session) {
 	queueInstallerBuildExecution(buildID)
 
 	redirectWithMessage(c, s, path, FlashSuccess, "Installer build queued")
+}
+
+// DeleteBuild permanently deletes a build and dependent releases/rollouts.
+func DeleteBuild(c flamego.Context, s session.Session) {
+	buildID := strings.TrimSpace(c.Param("id"))
+	if buildID == "" {
+		handleMutationError(c, s, "/builds", db.ErrBuildRequired)
+
+		return
+	}
+
+	if err := deleteBuildCascade(c.Request().Context(), buildID); err != nil {
+		handleMutationError(c, s, "/builds", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/builds", FlashSuccess, "Build permanently deleted")
 }
 
 // ReleasesPage renders releases list and create form.
@@ -1005,6 +1059,24 @@ func WithdrawRelease(c flamego.Context, s session.Session) {
 	}
 
 	redirectWithMessage(c, s, "/releases", FlashSuccess, "Release taken down")
+}
+
+// DeleteRelease permanently deletes a release and dependent rollouts.
+func DeleteRelease(c flamego.Context, s session.Session) {
+	releaseID := strings.TrimSpace(c.Param("id"))
+	if releaseID == "" {
+		handleMutationError(c, s, "/releases", db.ErrReleaseRequired)
+
+		return
+	}
+
+	if err := deleteReleaseCascade(c.Request().Context(), releaseID); err != nil {
+		handleMutationError(c, s, "/releases", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/releases", FlashSuccess, "Release permanently deleted")
 }
 
 // DevicesPage renders devices list and create form.
@@ -1156,6 +1228,24 @@ func CreateRollout(c flamego.Context, s session.Session) {
 	}
 
 	redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
+}
+
+// DeleteRollout permanently deletes a rollout.
+func DeleteRollout(c flamego.Context, s session.Session) {
+	rolloutID := strings.TrimSpace(c.Param("id"))
+	if rolloutID == "" {
+		handleMutationError(c, s, "/rollouts", db.ErrRolloutNotFound)
+
+		return
+	}
+
+	if err := db.DeleteRollout(c.Request().Context(), rolloutID); err != nil {
+		handleMutationError(c, s, "/rollouts", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout permanently deleted")
 }
 
 func markRolloutFailed(ctx context.Context, rolloutID string) {
@@ -1377,6 +1467,196 @@ func selectedFleetIDsFromForm(values url.Values) []string {
 	}
 
 	return []string{fleetID}
+}
+
+func deleteFleetCascade(ctx context.Context, fleetID string) error {
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return db.ErrFleetRequired
+	}
+
+	rollouts, err := db.ListRollouts(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, rollout := range rollouts {
+		if rollout.FleetID != fleetID {
+			continue
+		}
+
+		if err := db.DeleteRollout(ctx, rollout.ID); err != nil {
+			return err
+		}
+	}
+
+	builds, err := db.ListBuilds(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, build := range builds {
+		if build.FleetID != fleetID {
+			continue
+		}
+
+		if err := deleteBuildCascade(ctx, build.ID); err != nil {
+			return err
+		}
+	}
+
+	profiles, err := db.ListProfiles(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, profile := range profiles {
+		if !containsValue(profile.FleetIDs, fleetID) {
+			continue
+		}
+
+		if len(profile.FleetIDs) <= 1 {
+			if err := deleteProfileCascade(ctx, profile.ID); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		profileEdit, err := db.GetProfileForEdit(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+
+		remainingFleetIDs := removeString(profileEdit.FleetIDs, fleetID)
+		if len(remainingFleetIDs) == 0 {
+			if err := deleteProfileCascade(ctx, profile.ID); err != nil {
+				return err
+			}
+
+			continue
+		}
+
+		_, err = db.UpdateProfile(ctx, profile.ID, db.CreateProfileInput{
+			FleetIDs:            remainingFleetIDs,
+			Name:                profileEdit.Name,
+			Description:         profileEdit.Description,
+			ConfigJSON:          profileEdit.ConfigJSON,
+			RawNix:              profileEdit.RawNix,
+			ConfigSchemaVersion: profileEdit.ConfigSchemaVersion,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	if _, err := db.DeleteDevicesByFleet(ctx, fleetID); err != nil {
+		return err
+	}
+
+	return db.DeleteFleet(ctx, fleetID)
+}
+
+func deleteProfileCascade(ctx context.Context, profileID string) error {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return db.ErrProfileNotFound
+	}
+
+	builds, err := db.ListBuilds(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, build := range builds {
+		if build.ProfileID != profileID {
+			continue
+		}
+
+		if err := deleteBuildCascade(ctx, build.ID); err != nil {
+			return err
+		}
+	}
+
+	return db.DeleteProfile(ctx, profileID)
+}
+
+func deleteBuildCascade(ctx context.Context, buildID string) error {
+	buildID = strings.TrimSpace(buildID)
+	if buildID == "" {
+		return db.ErrBuildRequired
+	}
+
+	releases, err := db.ListReleases(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, release := range releases {
+		if release.BuildID != buildID {
+			continue
+		}
+
+		if err := deleteReleaseCascade(ctx, release.ID); err != nil {
+			return err
+		}
+	}
+
+	return db.DeleteBuild(ctx, buildID)
+}
+
+func deleteReleaseCascade(ctx context.Context, releaseID string) error {
+	releaseID = strings.TrimSpace(releaseID)
+	if releaseID == "" {
+		return db.ErrReleaseRequired
+	}
+
+	rollouts, err := db.ListRollouts(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, rollout := range rollouts {
+		if rollout.ReleaseID != releaseID {
+			continue
+		}
+
+		if err := db.DeleteRollout(ctx, rollout.ID); err != nil {
+			return err
+		}
+	}
+
+	return db.DeleteRelease(ctx, releaseID)
+}
+
+func removeString(values []string, target string) []string {
+	trimmedTarget := strings.TrimSpace(target)
+	if len(values) == 0 {
+		return []string{}
+	}
+
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || trimmed == trimmedTarget {
+			continue
+		}
+
+		filtered = append(filtered, trimmed)
+	}
+
+	return filtered
+}
+
+func containsValue(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	for _, value := range values {
+		if strings.TrimSpace(value) == trimmedTarget {
+			return true
+		}
+	}
+
+	return false
 }
 
 func fleetSelectionMap(fleetIDs []string) map[string]bool {

@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/charmbracelet/log v0.4.2
+	github.com/flamego/csrf v1.3.0
 	github.com/flamego/flamego v1.9.7
 	github.com/flamego/session v1.6.5
 	github.com/flamego/template v1.2.2

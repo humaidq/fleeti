@@ -33,6 +33,7 @@
 <section class="section-card">
   <h3>Kernel Settings</h3>
   <form method="post" action="/profiles/{{ .Profile.ID }}/kernel">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-kernel-attr">Kernel Version</label>
       <select id="profile-kernel-attr" name="kernel_attr" class="form-item">

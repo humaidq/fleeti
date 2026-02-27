@@ -10,6 +10,7 @@
 <section class="section-card">
   <h3>New Profile</h3>
   <form method="post" action="/profiles" class="form-grid">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-fleet">Fleets</label>
       <select id="profile-fleet" name="fleet_ids" class="form-item" multiple required>

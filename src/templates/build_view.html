@@ -16,6 +16,10 @@
 <div class="page-header">
   <h2>Build Details</h2>
   <div class="page-header-actions">
+    <form method="post" action="/builds/{{ .Build.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this build and all associated releases and rollouts? This cannot be undone.');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn btn-danger">Delete Permanently</button>
+    </form>
     <a href="/builds/{{ .Build.ID }}/logs" class="btn">{{ if eq .Build.Status "running" }}Live Log{{ else }}View Log{{ end }}</a>
     <a href="/builds" class="btn">Back to Builds</a>
   </div>
@@ -63,6 +67,7 @@
 
   {{ if and (eq .Build.Status "succeeded") (ne .Build.InstallerStatus "queued") (ne .Build.InstallerStatus "running") (ne .Build.InstallerStatus "succeeded") }}
   <form method="post" action="/builds/{{ .Build.ID }}/installer" class="inline-form">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <button type="submit" class="btn">Build Installer</button>
   </form>
   {{ else if or (eq .Build.InstallerStatus "queued") (eq .Build.InstallerStatus "running") }}

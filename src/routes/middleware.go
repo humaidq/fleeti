@@ -7,8 +7,17 @@ package routes
 import (
 	"net/http"
 
+	"github.com/flamego/csrf"
 	"github.com/flamego/flamego"
+	"github.com/flamego/template"
 )
+
+// CSRFInjector automatically injects CSRF token into template data for all routes.
+func CSRFInjector() flamego.Handler {
+	return func(x csrf.CSRF, data template.Data) {
+		data["csrf_token"] = x.Token()
+	}
+}
 
 // NoCacheHeaders disables caching for GET responses.
 func NoCacheHeaders() flamego.Handler {

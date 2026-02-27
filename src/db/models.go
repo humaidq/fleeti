@@ -316,6 +316,32 @@ func CreateFleet(ctx context.Context, name, description string) error {
 	return nil
 }
 
+func DeleteFleet(ctx context.Context, fleetID string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return ErrFleetRequired
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM fleets
+		WHERE id::text = $1
+	`, fleetID)
+	if err != nil {
+		return fmt.Errorf("failed to delete fleet: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrFleetNotFound
+	}
+
+	return nil
+}
+
 func ListProfiles(ctx context.Context) ([]Profile, error) {
 	p := GetPool()
 	if p == nil {
@@ -682,6 +708,32 @@ func UpdateProfile(ctx context.Context, profileID string, input CreateProfileInp
 	return createdNewRevision, nil
 }
 
+func DeleteProfile(ctx context.Context, profileID string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return ErrProfileNotFound
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM profiles
+		WHERE id::text = $1
+	`, profileID)
+	if err != nil {
+		return fmt.Errorf("failed to delete profile: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrProfileNotFound
+	}
+
+	return nil
+}
+
 type profileFleetQueryer interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
@@ -954,6 +1006,32 @@ func GetBuildByID(ctx context.Context, buildID string) (Build, error) {
 	}
 
 	return item, nil
+}
+
+func DeleteBuild(ctx context.Context, buildID string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	buildID = strings.TrimSpace(buildID)
+	if buildID == "" {
+		return ErrBuildRequired
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM builds
+		WHERE id::text = $1
+	`, buildID)
+	if err != nil {
+		return fmt.Errorf("failed to delete build: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrBuildNotFound
+	}
+
+	return nil
 }
 
 func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, error) {
@@ -1598,6 +1676,32 @@ func GetReleaseByID(ctx context.Context, releaseID string) (Release, error) {
 	return item, nil
 }
 
+func DeleteRelease(ctx context.Context, releaseID string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	releaseID = strings.TrimSpace(releaseID)
+	if releaseID == "" {
+		return ErrReleaseRequired
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM releases
+		WHERE id::text = $1
+	`, releaseID)
+	if err != nil {
+		return fmt.Errorf("failed to delete release: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrReleaseNotFound
+	}
+
+	return nil
+}
+
 func CreateRelease(ctx context.Context, input CreateReleaseInput) error {
 	p := GetPool()
 	if p == nil {
@@ -1857,6 +1961,28 @@ func CreateDevice(ctx context.Context, input CreateDeviceInput) error {
 	return nil
 }
 
+func DeleteDevicesByFleet(ctx context.Context, fleetID string) (int64, error) {
+	p := GetPool()
+	if p == nil {
+		return 0, ErrDatabaseConnectionNotInitialized
+	}
+
+	fleetID = strings.TrimSpace(fleetID)
+	if fleetID == "" {
+		return 0, ErrFleetRequired
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM devices
+		WHERE fleet_id::text = $1
+	`, fleetID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete fleet devices: %w", err)
+	}
+
+	return result.RowsAffected(), nil
+}
+
 func GetReleaseDeploymentInfo(ctx context.Context, releaseID string) (ReleaseDeploymentInfo, error) {
 	p := GetPool()
 	if p == nil {
@@ -2050,6 +2176,32 @@ func GetRolloutByID(ctx context.Context, rolloutID string) (Rollout, error) {
 	}
 
 	return item, nil
+}
+
+func DeleteRollout(ctx context.Context, rolloutID string) error {
+	p := GetPool()
+	if p == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	rolloutID = strings.TrimSpace(rolloutID)
+	if rolloutID == "" {
+		return ErrRolloutNotFound
+	}
+
+	result, err := p.Exec(ctx, `
+		DELETE FROM rollouts
+		WHERE id::text = $1
+	`, rolloutID)
+	if err != nil {
+		return fmt.Errorf("failed to delete rollout: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrRolloutNotFound
+	}
+
+	return nil
 }
 
 func CreateRollout(ctx context.Context, input CreateRolloutInput) (string, error) {

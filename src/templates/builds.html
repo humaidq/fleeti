@@ -12,6 +12,7 @@
   <details class="add-item-details">
     <summary class="add-item-summary">+ Create Build</summary>
     <form method="post" action="/builds" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <div class="add-item-field">
         <label for="build-profile">Profile</label>
         <select id="build-profile" name="profile_id" class="form-item" required>

@@ -1,7 +1,7 @@
 {{ define "foot" }}
     </main>
     <footer>
-      <p>fleeti project - Humaid Alqasimi</p>
+      <p>fleeti project - Humaid Alqasimi{{ if .AppVersion }} - {{ .AppVersion }}{{ end }}</p>
     </footer>
   </body>
 </html>

@@ -25,6 +25,9 @@ github.com/charmbracelet/x/cellbuf
 # github.com/charmbracelet/x/term v0.2.1
 ## explicit; go 1.18
 github.com/charmbracelet/x/term
+# github.com/flamego/csrf v1.3.0
+## explicit; go 1.18
+github.com/flamego/csrf
 # github.com/flamego/flamego v1.9.7
 ## explicit; go 1.19
 github.com/flamego/flamego
