@@ -9,7 +9,7 @@
 
 pkgs.buildGoModule rec {
   pname = "fleeti";
-  version = "v0.1.1";
+  version = "v0.2.0";
 
   src = ./.;
 
