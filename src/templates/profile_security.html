@@ -1,0 +1,44 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile Security</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}/security/search" class="btn">Open AI Security Search</a>
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card wizard-intro-card">
+  <h3>Manual Security Editing</h3>
+  <p class="muted-text">Edit the full hardening profile directly here, or switch to AI Security Search for candidate generation and evaluation.</p>
+</section>
+
+<section class="section-card wizard-form-block">
+  <h3>Security Hardening</h3>
+  {{ template "profile_security_form" . }}
+</section>
+
+{{ template "foot" . }}

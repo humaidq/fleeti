@@ -1,0 +1,1014 @@
+openapi: 3.1.0
+info:
+  title: Fleeti API
+  version: 1.0.0
+  summary: Authenticated API for Fleeti automation.
+  description: |
+    Fleeti exposes API endpoints secured with per-user API keys.
+
+    API keys inherit the access of the user who created them. Non-admin users
+    only receive resources they can already view in the web UI.
+servers:
+  - url: https://admin.fleeti.ae
+    description: Production admin API
+tags:
+  - name: Profiles
+    description: Read-only profile access scoped to the authenticated user.
+  - name: Builds
+    description: Build listing and creation scoped to a visible profile.
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      tags:
+        - Profiles
+      summary: List visible profiles
+      description: Returns the profiles visible to the authenticated API key owner.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Profiles visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileListResponse'
+              examples:
+                success:
+                  summary: Example response
+                  value:
+                    profiles:
+                      - id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                        fleet_id: fleet-primary
+                        fleet_ids:
+                          - fleet-primary
+                          - fleet-secondary
+                        fleet_name: Primary Fleet
+                        name: Production Base
+                        description: Base image for production devices.
+                        latest_revision: 12
+                        config_hash: b7b98f7c4cf1a9dcbf8a1a5a35da1431f34a9d48973026e5f86f4cc6b6d5d7dd
+                        created_at: '2026-03-18 12:00:00'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  summary: Missing API key
+                  value:
+                    error: API key required
+                invalid:
+                  summary: Invalid API key
+                  value:
+                    error: Invalid API key
+  /api/v1/profiles/{id}:
+    get:
+      operationId: getProfile
+      tags:
+        - Profiles
+      summary: Get profile configuration
+      description: Returns the latest visible profile metadata and configuration for the authenticated API key owner.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Latest profile configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileDetailResponse'
+              examples:
+                success:
+                  summary: Example response
+                  value:
+                    profile:
+                      id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                      fleet_id: fleet-primary
+                      fleet_ids:
+                        - fleet-primary
+                        - fleet-secondary
+                      fleet_name: Primary Fleet, Secondary Fleet
+                      name: Production Base
+                      description: Base image for production devices.
+                      latest_revision: 12
+                      config_hash: b7b98f7c4cf1a9dcbf8a1a5a35da1431f34a9d48973026e5f86f4cc6b6d5d7dd
+                      config_schema_version: 1
+                      created_at: '2026-03-18 12:00:00'
+                      config:
+                        packages:
+                          - vim
+                          - curl
+                        kernel:
+                          attr: linux_6_19
+                          source_override:
+                            enabled: true
+                            url: https://github.com/example/linux.git
+                            ref: refs/heads/main
+                            rev: abcd1234abcd1234abcd1234abcd1234abcd1234
+                            patches:
+                              - name: 0001-fix.patch
+                                sha256: be6f08ca3e84fdbcf9f53c778f1944f24591b31af08c74f81f6ff497f57a5717
+                                content_base64: ZGlmZiAtLWdpdCBhL2ZvbyBiL2Zvbwo=
+                        openclaw_microvm_enabled: true
+                      packages:
+                        - vim
+                        - curl
+                      kernel:
+                        attr: linux_6_19
+                        source_override:
+                          enabled: true
+                          url: https://github.com/example/linux.git
+                          ref: refs/heads/main
+                          rev: abcd1234abcd1234abcd1234abcd1234abcd1234
+                          patches:
+                            - name: 0001-fix.patch
+                              sha256: be6f08ca3e84fdbcf9f53c778f1944f24591b31af08c74f81f6ff497f57a5717
+                              content_base64: ZGlmZiAtLWdpdCBhL2ZvbyBiL2Zvbwo=
+                      openclaw_microvm_enabled: true
+                      raw_nix: '{ pkgs, ... }: {}'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found or not visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  summary: Missing profile
+                  value:
+                    error: Profile not found
+    put:
+      operationId: replaceProfile
+      tags:
+        - Profiles
+      summary: Replace profile configuration
+      description: Replaces the profile config JSON for the latest revision and optionally updates raw Nix overrides or schema version.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileReplaceRequest'
+            examples:
+              replaceConfig:
+                summary: Replace the full config object
+                value:
+                  config:
+                    packages:
+                      - vim
+                      - curl
+                    kernel:
+                      attr: linux_6_19
+                      source_override:
+                        enabled: true
+                        url: https://github.com/example/linux.git
+                        ref: refs/heads/main
+                        rev: abcd1234abcd1234abcd1234abcd1234abcd1234
+                    openclaw_microvm_enabled: true
+                    custom_banner: Production profile
+                  raw_nix: '{ pkgs, ... }: { services.openssh.enable = true; }'
+                  config_schema_version: 2
+      responses:
+        '200':
+          description: Updated profile configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileMutationResponse'
+              examples:
+                replaced:
+                  summary: Replaced profile config with a new revision
+                  value:
+                    created_new_revision: true
+                    profile:
+                      id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                      fleet_id: fleet-primary
+                      fleet_ids:
+                        - fleet-primary
+                        - fleet-secondary
+                      fleet_name: Primary Fleet, Secondary Fleet
+                      name: Production Base
+                      description: Base image for production devices.
+                      latest_revision: 13
+                      config_hash: e6fbc4d0a2d18417d77d1815f6d9f466c52fd208dafeb807dcad1e9c8cdf3cf9
+                      config_schema_version: 2
+                      created_at: '2026-03-18 12:00:00'
+                      config:
+                        packages:
+                          - vim
+                          - curl
+                        kernel:
+                          attr: linux_6_19
+                          source_override:
+                            enabled: true
+                            url: https://github.com/example/linux.git
+                            ref: refs/heads/main
+                            rev: abcd1234abcd1234abcd1234abcd1234abcd1234
+                        openclaw_microvm_enabled: true
+                        custom_banner: Production profile
+                      packages:
+                        - vim
+                        - curl
+                      kernel:
+                        attr: linux_6_19
+                        source_override:
+                          enabled: true
+                          url: https://github.com/example/linux.git
+                          ref: refs/heads/main
+                          rev: abcd1234abcd1234abcd1234abcd1234abcd1234
+                          patches: []
+                      openclaw_microvm_enabled: true
+                      raw_nix: '{ pkgs, ... }: { services.openssh.enable = true; }'
+        '400':
+          description: Invalid profile mutation request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The authenticated user can view the profile but cannot modify it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found or not visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      operationId: patchProfile
+      tags:
+        - Profiles
+      summary: Partially update profile configuration
+      description: Applies partial profile config updates for fields like packages, kernel settings, OpenClaw, raw Nix overrides, or arbitrary top-level config keys.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfilePatchRequest'
+            examples:
+              patchPackagesAndKernel:
+                summary: Update selected config fields
+                value:
+                  config:
+                    custom_banner: Canary rollout
+                  packages:
+                    - vim
+                    - htop
+                  kernel:
+                    attr: linux_6_19
+                  openclaw_microvm_enabled: false
+      responses:
+        '200':
+          description: Updated profile configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileMutationResponse'
+              examples:
+                patched:
+                  summary: Patched profile without changing raw Nix
+                  value:
+                    created_new_revision: true
+                    profile:
+                      id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                      fleet_id: fleet-primary
+                      fleet_ids:
+                        - fleet-primary
+                        - fleet-secondary
+                      fleet_name: Primary Fleet, Secondary Fleet
+                      name: Production Base
+                      description: Base image for production devices.
+                      latest_revision: 14
+                      config_hash: 9b5c5129a7326f3ab3c6a5e04df4e7230f7d6f4e14cd0c57c6dbfd8a57dbc1df
+                      config_schema_version: 2
+                      created_at: '2026-03-18 12:00:00'
+                      config:
+                        packages:
+                          - vim
+                          - htop
+                        kernel:
+                          attr: linux_6_19
+                        openclaw_microvm_enabled: false
+                        custom_banner: Canary rollout
+                      packages:
+                        - vim
+                        - htop
+                      kernel:
+                        attr: linux_6_19
+                        source_override:
+                          enabled: false
+                          patches: []
+                      openclaw_microvm_enabled: false
+                      raw_nix: '{ pkgs, ... }: { services.openssh.enable = true; }'
+        '400':
+          description: Invalid profile mutation request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The authenticated user can view the profile but cannot modify it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found or not visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/profiles/{id}/builds:
+    get:
+      operationId: listProfileBuilds
+      tags:
+        - Builds
+      summary: List profile builds
+      description: Returns builds for a profile visible to the authenticated API key owner.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Builds associated with the requested profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildListResponse'
+              examples:
+                success:
+                  summary: Example response
+                  value:
+                    builds:
+                      - id: 0f124946-c8f1-47a0-a030-cbc28fb6f1d2
+                        profile_id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                        profile_name: Production Base
+                        fleet_id: fleet-primary
+                        fleet_name: Primary Fleet
+                        profile_revision_id: 53267f7c-7a0f-4f16-a02d-befc64c4ddf4
+                        profile_revision: 14
+                        version: v1.4.0
+                        status: queued
+                        installer_status: not_requested
+                        created_at: '2026-03-20 11:30:00'
+                      - id: 3a5b2dc6-6737-47e5-a10d-e2e7bdad4d78
+                        profile_id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                        profile_name: Production Base
+                        fleet_id: fleet-secondary
+                        fleet_name: Secondary Fleet
+                        profile_revision_id: 90ce5188-b7cc-42f7-a8dd-c5523fec7dfc
+                        profile_revision: 13
+                        version: v1.3.1
+                        status: succeeded
+                        artifact: updates/builds/v1.3.1
+                        installer_status: succeeded
+                        installer_artifact: updates/installers/v1.3.1
+                        created_at: '2026-03-19 08:15:00'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found or not visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: createProfileBuild
+      tags:
+        - Builds
+      summary: Create profile build
+      description: Queues a new build for a profile the authenticated API key owner can manage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBuildRequest'
+            examples:
+              queueBuild:
+                summary: Queue a new build
+                value:
+                  fleet_id: fleet-primary
+                  version: v1.4.0
+      responses:
+        '201':
+          description: Build queued successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponse'
+              examples:
+                queued:
+                  summary: Queued build response
+                  value:
+                    build:
+                      id: 0f124946-c8f1-47a0-a030-cbc28fb6f1d2
+                      profile_id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                      profile_name: Production Base
+                      fleet_id: fleet-primary
+                      fleet_name: Primary Fleet
+                      profile_revision_id: 53267f7c-7a0f-4f16-a02d-befc64c4ddf4
+                      profile_revision: 14
+                      version: v1.4.0
+                      status: queued
+                      installer_status: not_requested
+                      created_at: '2026-03-20 11:30:00'
+        '400':
+          description: Invalid build request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidVersion:
+                  summary: Invalid build version
+                  value:
+                    error: Version must use semver format like v1.1.0
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: The authenticated user cannot manage the profile or selected fleet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile not found or not visible to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/profiles/{id}/builds/{buildId}:
+    get:
+      operationId: getProfileBuild
+      tags:
+        - Builds
+      summary: Get profile build
+      description: Returns a specific build for a profile visible to the authenticated API key owner.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+        - name: buildId
+          in: path
+          required: true
+          description: Build identifier.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Requested build.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponse'
+              examples:
+                success:
+                  summary: Example response
+                  value:
+                    build:
+                      id: 0f124946-c8f1-47a0-a030-cbc28fb6f1d2
+                      profile_id: a8ce71df-4c80-4d45-919a-bfd474a4d724
+                      profile_name: Production Base
+                      fleet_id: fleet-primary
+                      fleet_name: Primary Fleet
+                      profile_revision_id: 53267f7c-7a0f-4f16-a02d-befc64c4ddf4
+                      profile_revision: 14
+                      version: v1.4.0
+                      status: succeeded
+                      artifact: updates/builds/v1.4.0
+                      installer_status: queued
+                      created_at: '2026-03-20 11:30:00'
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile or build not found, or the build does not belong to the requested profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  summary: Missing build
+                  value:
+                    error: Build not found
+  /api/v1/profiles/{id}/builds/{buildId}/logs:
+    get:
+      operationId: getProfileBuildLogs
+      tags:
+        - Builds
+      summary: Poll build logs
+      description: Returns incremental build log content for a specific profile build so API clients can watch queued and running builds.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Profile identifier.
+          schema:
+            type: string
+        - name: buildId
+          in: path
+          required: true
+          description: Build identifier.
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          description: Return chunks with an ID greater than this value. Start with `0` or omit it.
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Incremental build log payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildLogResponse'
+              examples:
+                queued:
+                  summary: Build is still queued
+                  value:
+                    status: queued
+                    chunk: ''
+                    next_after: 0
+                    done: false
+                running:
+                  summary: Build is producing logs
+                  value:
+                    status: running
+                    chunk: 'starting nix build\ncopying sources\n'
+                    next_after: 18
+                    done: false
+                completed:
+                  summary: Build completed and no more chunks remain
+                  value:
+                    status: succeeded
+                    chunk: 'build completed successfully\n'
+                    next_after: 24
+                    done: true
+        '400':
+          description: Invalid polling cursor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidAfter:
+                  summary: Invalid after value
+                  value:
+                    error: Invalid after value
+        '401':
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Profile or build not found, or the build does not belong to the requested profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missing:
+                  summary: Missing build
+                  value:
+                    error: Build not found
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+      description: |
+        Provide a Fleeti API key in the `Authorization` header:
+
+        `Authorization: Bearer flt_...`
+  schemas:
+    BuildListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - builds
+      properties:
+        builds:
+          type: array
+          items:
+            $ref: '#/components/schemas/Build'
+    BuildResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - build
+      properties:
+        build:
+          $ref: '#/components/schemas/Build'
+    BuildLogResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - chunk
+        - next_after
+        - done
+      properties:
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - succeeded
+            - failed
+        chunk:
+          type: string
+          description: Concatenated log output returned since the requested cursor.
+        next_after:
+          type: integer
+          minimum: 0
+          description: Cursor value to send in the next polling request.
+        done:
+          type: boolean
+          description: True when the build is in a terminal state and there are no more log chunks to read.
+    ProfileListResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - profiles
+      properties:
+        profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/Profile'
+    ProfileDetailResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - profile
+      properties:
+        profile:
+          $ref: '#/components/schemas/ProfileDetail'
+    ProfileMutationResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - profile
+        - created_new_revision
+      properties:
+        profile:
+          $ref: '#/components/schemas/ProfileDetail'
+        created_new_revision:
+          type: boolean
+          description: Whether the mutation created a new profile revision.
+    Build:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - profile_id
+        - profile_revision_id
+        - profile_revision
+        - version
+        - status
+        - installer_status
+        - created_at
+      properties:
+        id:
+          type: string
+        profile_id:
+          type: string
+        profile_name:
+          type: string
+        fleet_id:
+          type: string
+        fleet_name:
+          type: string
+        profile_revision_id:
+          type: string
+        profile_revision:
+          type: integer
+          minimum: 1
+        version:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - succeeded
+            - failed
+        artifact:
+          type: string
+        installer_status:
+          type: string
+          enum:
+            - not_requested
+            - queued
+            - running
+            - succeeded
+            - failed
+        installer_artifact:
+          type: string
+        created_at:
+          type: string
+          description: UTC timestamp string returned by the current API implementation.
+    CreateBuildRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - fleet_id
+        - version
+      properties:
+        fleet_id:
+          type: string
+          description: Fleet identifier. The selected fleet must already be assigned to the profile.
+        version:
+          type: string
+          description: Build version using v-prefixed semver.
+    Profile:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - fleet_ids
+        - name
+        - latest_revision
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Profile identifier.
+        fleet_id:
+          type: string
+          description: Primary fleet identifier when one is available.
+        fleet_ids:
+          type: array
+          description: All fleet identifiers assigned to the profile.
+          items:
+            type: string
+        fleet_name:
+          type: string
+          description: Human-readable name of the primary fleet.
+        name:
+          type: string
+          description: Profile name.
+        description:
+          type: string
+          description: Optional profile description.
+        latest_revision:
+          type: integer
+          minimum: 0
+          description: Latest known profile revision.
+        config_hash:
+          type: string
+          description: Hash of the latest configuration revision when available.
+        created_at:
+          type: string
+          description: UTC timestamp string returned by the current API implementation.
+    ProfileDetail:
+      allOf:
+        - $ref: '#/components/schemas/Profile'
+        - type: object
+          additionalProperties: false
+          required:
+            - config_schema_version
+            - config
+            - packages
+            - kernel
+            - openclaw_microvm_enabled
+          properties:
+            config_schema_version:
+              type: integer
+              minimum: 0
+              description: Current configuration schema version for the latest revision.
+            config:
+              type: object
+              description: Canonical JSON configuration object for the latest profile revision.
+              additionalProperties: true
+            packages:
+              type: array
+              description: Parsed package list from the profile configuration.
+              items:
+                type: string
+            kernel:
+              $ref: '#/components/schemas/ProfileKernelConfig'
+            openclaw_microvm_enabled:
+              type: boolean
+              description: Whether the OpenClaw MicroVM integration is enabled.
+            raw_nix:
+              type: string
+              description: Raw Nix overrides stored with the latest profile revision.
+    ProfileReplaceRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - config
+      properties:
+        config:
+          type: object
+          description: Full replacement config JSON object for the latest profile revision.
+          additionalProperties: true
+        packages:
+          type: array
+          description: Optional convenience override for the `packages` config field.
+          items:
+            type: string
+        kernel:
+          $ref: '#/components/schemas/ProfileKernelConfigInput'
+        openclaw_microvm_enabled:
+          type: boolean
+        raw_nix:
+          type: string
+        config_schema_version:
+          type: integer
+          minimum: 1
+    ProfilePatchRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        config:
+          type: object
+          description: Top-level config keys to merge into the existing config object.
+          additionalProperties: true
+        packages:
+          type: array
+          description: Replace the parsed package list in the existing config.
+          items:
+            type: string
+        kernel:
+          $ref: '#/components/schemas/ProfileKernelConfigInput'
+        openclaw_microvm_enabled:
+          type: boolean
+        raw_nix:
+          type: string
+        config_schema_version:
+          type: integer
+          minimum: 1
+    ProfileKernelConfig:
+      type: object
+      additionalProperties: false
+      required:
+        - source_override
+      properties:
+        attr:
+          type: string
+          description: Selected kernel attribute.
+        source_override:
+          $ref: '#/components/schemas/ProfileKernelSourceOverride'
+    ProfileKernelSourceOverride:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+        - patches
+      properties:
+        enabled:
+          type: boolean
+        url:
+          type: string
+          format: uri
+        ref:
+          type: string
+        rev:
+          type: string
+        patches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProfileKernelPatch'
+    ProfileKernelConfigInput:
+      type: object
+      additionalProperties: false
+      properties:
+        attr:
+          type: string
+        source_override:
+          $ref: '#/components/schemas/ProfileKernelSourceOverrideInput'
+    ProfileKernelSourceOverrideInput:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+        url:
+          type: string
+          format: uri
+        ref:
+          type: string
+        rev:
+          type: string
+        patches:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProfileKernelPatch'
+    ProfileKernelPatch:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - sha256
+        - content_base64
+      properties:
+        name:
+          type: string
+        sha256:
+          type: string
+        content_base64:
+          type: string
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - error
+      properties:
+        error:
+          type: string

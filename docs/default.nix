@@ -25,8 +25,9 @@ buildNpmPackage {
 
   # Tell sharp to use system libvips instead of building from source.
   SHARP_IGNORE_GLOBAL_LIBVIPS = "1";
+  npmFlags = [ "--legacy-peer-deps" ];
 
-  npmDepsHash = "sha256-YHx0j49BuuQWrfv2vPmNjRas/tXKlGPJY7BV+qkZij8=";
+  npmDepsHash = "sha256-wQfDKkBKY8Q4xFSy7qE/6owi+eDjQ31AdBfEtqB4xTw=";
 
   installPhase = ''
     runHook preInstall

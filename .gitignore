@@ -30,4 +30,6 @@ go.work.sum
 .direnv/
 result
 *.raw
+*.log
 updates/
+report/

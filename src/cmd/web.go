@@ -65,6 +65,8 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("failed to configure WebAuthn: %w", err)
 	}
 
+	profileWizardAI := routes.NewProfileWizardAIFromEnv()
+
 	appLogger.Info("connecting to database")
 
 	if err := db.Init(ctx); err != nil {
@@ -97,10 +99,15 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		appLogger.Warn("recovered interrupted installer builds", "count", recoveredInstallerBuilds)
 	}
 
+	if err := routes.InitializeKernelOptionsCache(ctx); err != nil {
+		appLogger.Warn("failed to initialize kernel options cache", "error", err)
+	}
+
 	f := flamego.New()
 	configureEmptyNotFoundHandler(f)
 	f.Use(flamego.Recovery())
 	f.Map(webAuthn)
+	f.Map(profileWizardAI)
 	f.Use(session.Sessioner(session.Options{
 		Initer: db.PostgresSessionIniter(),
 		Config: db.PostgresSessionConfig{
@@ -161,6 +168,16 @@ func start(ctx context.Context, cmd *cli.Command) error {
 
 	f.Get("/connectivity", routes.Connectivity)
 	f.Get("/healthz", routes.Healthz)
+	f.Group("/api/v1", func() {
+		f.Get("/profiles", routes.APIProfiles)
+		f.Get("/profiles/{id}", routes.APIProfile)
+		f.Get("/profiles/{id}/builds", routes.APIProfileBuilds)
+		f.Get("/profiles/{id}/builds/{buildId}", routes.APIProfileBuild)
+		f.Get("/profiles/{id}/builds/{buildId}/logs", routes.APIProfileBuildLogs)
+		f.Post("/profiles/{id}/builds", routes.APICreateProfileBuild)
+		f.Put("/profiles/{id}", routes.APIReplaceProfile)
+		f.Patch("/profiles/{id}", routes.APIPatchProfile)
+	}, routes.RequireAPIUser())
 
 	f.Get("/login", routes.LoginForm)
 	f.Get("/setup", routes.SetupForm)
@@ -188,6 +205,8 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Post("/webauthn/passkey/start", csrf.Validate, routes.PasskeyRegistrationStart)
 		f.Post("/webauthn/passkey/finish", csrf.Validate, routes.PasskeyRegistrationFinish)
 		f.Post("/security/passkeys/{id}/delete", csrf.Validate, routes.DeletePasskey)
+		f.Post("/security/api-keys", csrf.Validate, routes.CreateAPIKey)
+		f.Post("/security/api-keys/{id}/delete", csrf.Validate, routes.DeleteAPIKey)
 		f.Post("/security/invites", csrf.Validate, routes.CreateUserInvite)
 		f.Post("/security/invites/{id}/regenerate", csrf.Validate, routes.RegenerateUserInvite)
 		f.Post("/security/invites/{id}/delete", csrf.Validate, routes.DeleteUserInvite)
@@ -203,16 +222,31 @@ func start(ctx context.Context, cmd *cli.Command) error {
 
 		f.Get("/profiles", routes.ProfilesPage)
 		f.Get("/profiles/new", routes.NewProfilePage)
+		f.Get("/profiles/wizard", routes.ProfileWizardPage)
 		f.Post("/profiles", csrf.Validate, routes.CreateProfile)
+		f.Post("/profiles/wizard/chat", csrf.Validate, routes.ProfileWizardChat)
+		f.Post("/profiles/wizard/apply", csrf.Validate, routes.ProfileWizardApply)
+		f.Post("/profiles/wizard/discard", csrf.Validate, routes.ProfileWizardDiscard)
 		f.Get("/profiles/{id}", routes.ProfilePage)
+		f.Get("/profiles/{id}/wizard", routes.ProfileWizardPage)
+		f.Post("/profiles/{id}/wizard/chat", csrf.Validate, routes.ProfileWizardChat)
+		f.Post("/profiles/{id}/wizard/apply", csrf.Validate, routes.ProfileWizardApply)
+		f.Post("/profiles/{id}/wizard/discard", csrf.Validate, routes.ProfileWizardDiscard)
 		f.Get("/profiles/{id}/deployments", routes.ProfileDeploymentsPage)
 		f.Get("/profiles/{id}/edit", routes.EditProfilePage)
 		f.Get("/profiles/{id}/access", routes.ProfileAccessPage)
+		f.Get("/profiles/{id}/security", routes.ProfileSecurityPage)
+		f.Get("/profiles/{id}/security/search", routes.ProfileSecuritySearchPage)
 		f.Get("/profiles/{id}/packages", routes.ProfilePackagesPage)
+		f.Get("/profiles/{id}/security/search/{job_id}", routes.ProfileSecuritySearchStatus)
+		f.Post("/profiles/{id}/security", csrf.Validate, routes.UpdateProfileSecurity)
+		f.Post("/profiles/{id}/security/search", csrf.Validate, routes.ProfileSecuritySearch)
 		f.Post("/profiles/{id}/packages", csrf.Validate, routes.AddProfilePackage)
 		f.Post("/profiles/{id}/packages/remove", csrf.Validate, routes.RemoveProfilePackage)
 		f.Get("/profiles/{id}/kernel", routes.ProfileKernelPage)
 		f.Post("/profiles/{id}/kernel", csrf.Validate, routes.UpdateProfileKernel)
+		f.Get("/profiles/{id}/openclaw", routes.ProfileOpenClawPage)
+		f.Post("/profiles/{id}/openclaw", csrf.Validate, routes.UpdateProfileOpenClaw)
 		f.Get("/profiles/{id}/raw-nix", routes.ProfileRawNixPage)
 		f.Post("/profiles/{id}/raw-nix", csrf.Validate, routes.UpdateProfileRawNix)
 		f.Get("/profiles/{id}/builds/{build_id}", routes.ProfileBuildPage)

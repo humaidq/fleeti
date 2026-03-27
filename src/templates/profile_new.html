@@ -3,12 +3,14 @@
 <div class="page-header">
   <h2>Create Profile</h2>
   <div class="page-header-actions">
+    <a href="/profiles/wizard" class="btn">Use AI Wizard</a>
     <a href="/profiles" class="btn">Back to Profiles</a>
   </div>
 </div>
 
 <section class="section-card">
   <h3>New Profile</h3>
+  <p class="muted-text">Prefer a conversational flow? <a href="/profiles/wizard">Open the AI wizard</a> to build a draft before saving it.</p>
   <form method="post" action="/profiles" class="form-grid">
     <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">

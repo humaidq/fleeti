@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -21,6 +22,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/humaidq/fleeti/v2/db"
@@ -37,6 +39,16 @@ const (
 
 var profileKernelAttrPattern = regexp.MustCompile(`^linux_[0-9]+_[0-9]+(_hardened)?$`)
 var profileKernelPatchSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+var errKernelOptionsCacheNotInitialized = errors.New("kernel options cache is not initialized")
+
+var (
+	kernelOptionsCacheMu          sync.RWMutex
+	kernelOptionsCacheInitOnce    sync.Once
+	kernelOptionsCacheInitialized bool
+	kernelOptionsCache            []KernelOption
+	kernelOptionsCacheErr         error
+)
 
 type ProfileKernelPatch struct {
 	Name          string
@@ -67,7 +79,58 @@ type kernelOptionJSON struct {
 	Version string `json:"version"`
 }
 
-func listAvailableKernelOptions(ctx context.Context) ([]KernelOption, error) {
+// InitializeKernelOptionsCache loads kernel options once and stores them in-memory.
+func InitializeKernelOptionsCache(ctx context.Context) error {
+	kernelOptionsCacheInitOnce.Do(func() {
+		options, err := queryAvailableKernelOptions(ctx)
+
+		kernelOptionsCacheMu.Lock()
+		kernelOptionsCache = cloneKernelOptions(options)
+		kernelOptionsCacheErr = err
+		kernelOptionsCacheInitialized = true
+		kernelOptionsCacheMu.Unlock()
+	})
+
+	kernelOptionsCacheMu.RLock()
+	defer kernelOptionsCacheMu.RUnlock()
+
+	if !kernelOptionsCacheInitialized {
+		return errKernelOptionsCacheNotInitialized
+	}
+
+	return kernelOptionsCacheErr
+}
+
+func listAvailableKernelOptions(_ context.Context) ([]KernelOption, error) {
+	kernelOptionsCacheMu.RLock()
+	initialized := kernelOptionsCacheInitialized
+	options := cloneKernelOptions(kernelOptionsCache)
+	err := kernelOptionsCacheErr
+	kernelOptionsCacheMu.RUnlock()
+
+	if !initialized {
+		return nil, errKernelOptionsCacheNotInitialized
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return options, nil
+}
+
+func cloneKernelOptions(options []KernelOption) []KernelOption {
+	if len(options) == 0 {
+		return []KernelOption{}
+	}
+
+	cloned := make([]KernelOption, len(options))
+	copy(cloned, options)
+
+	return cloned
+}
+
+func queryAvailableKernelOptions(ctx context.Context) ([]KernelOption, error) {
 	evalCtx, cancel := context.WithTimeout(ctx, kernelOptionsCommandTimeout)
 	defer cancel()
 

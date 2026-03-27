@@ -1,0 +1,130 @@
+{{ define "profile_security_form" }}
+<form method="post" action="/profiles/{{ .Profile.ID }}/security" data-profile-security-form>
+  <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+
+  <div class="form-group">
+    <label class="checkbox-label" for="profile-security-firewall-enabled">
+      <input id="profile-security-firewall-enabled" type="checkbox" name="firewall_enabled" value="1"{{ if .Security.Firewall.Enable }} checked{{ end }} />
+      Enable firewall
+    </label>
+    <small class="muted-text">Configure profile-level <code>networking.firewall</code> rules for generated systems.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-firewall-tcp-ports">Allowed TCP ports</label>
+    <input id="profile-security-firewall-tcp-ports" name="firewall_allowed_tcp_ports" class="form-item" value="{{ .FirewallAllowedTCPPortsValue }}" placeholder="22, 80, 443" />
+    <small class="muted-text">Comma, space, or newline separated ports. Leave empty to allow none.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-firewall-udp-ports">Allowed UDP ports</label>
+    <input id="profile-security-firewall-udp-ports" name="firewall_allowed_udp_ports" class="form-item" value="{{ .FirewallAllowedUDPPortsValue }}" placeholder="53, 123" />
+    <small class="muted-text">Comma, space, or newline separated ports. Leave empty to allow none.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-kernel-modules">Blacklisted kernel modules</label>
+    <textarea id="profile-security-kernel-modules" name="blacklisted_kernel_modules" class="form-item" rows="6" placeholder="firewire-core&#10;usb-storage">{{ .BlacklistedKernelModulesValue }}</textarea>
+    <small class="muted-text">One per line, or separate with commas/spaces. Fleeti writes these to <code>boot.blacklistedKernelModules</code>.</small>
+  </div>
+
+  <div class="form-group">
+    <label class="checkbox-label" for="profile-security-apparmor-enabled">
+      <input id="profile-security-apparmor-enabled" type="checkbox" name="apparmor_enabled" value="1"{{ if .Security.AppArmor.Enable }} checked{{ end }} />
+      Enable AppArmor
+    </label>
+    <small class="muted-text">When enabled, Fleeti also adds the implicit AppArmor packages <code>apparmor-utils</code> and <code>apparmor-profiles</code>.</small>
+  </div>
+
+  <div class="form-group">
+    <label class="checkbox-label" for="profile-security-password-pwquality-enabled">
+      <input id="profile-security-password-pwquality-enabled" type="checkbox" name="password_pwquality_enabled" value="1"{{ if .Security.PasswordPolicy.PWQuality.Enable }} checked{{ end }} />
+      Enable password quality policy
+    </label>
+    <small class="muted-text">Adds <code>pam_pwquality</code> to password change flows for <code>passwd</code> and <code>chpasswd</code>.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-min-length">Minimum password length</label>
+    <input id="profile-security-password-pwquality-min-length" type="number" min="1" name="password_pwquality_min_length" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.MinimumLength }}{{ end }}" placeholder="12" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-min-digits">Minimum digits</label>
+    <input id="profile-security-password-pwquality-min-digits" type="number" min="0" name="password_pwquality_min_digits" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.MinimumDigits }}{{ end }}" placeholder="1" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-min-upper">Minimum uppercase characters</label>
+    <input id="profile-security-password-pwquality-min-upper" type="number" min="0" name="password_pwquality_min_upper" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.MinimumUpper }}{{ end }}" placeholder="1" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-min-lower">Minimum lowercase characters</label>
+    <input id="profile-security-password-pwquality-min-lower" type="number" min="0" name="password_pwquality_min_lower" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.MinimumLower }}{{ end }}" placeholder="1" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-min-other">Minimum special characters</label>
+    <input id="profile-security-password-pwquality-min-other" type="number" min="0" name="password_pwquality_min_other" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.MinimumOther }}{{ end }}" placeholder="1" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-pwquality-retry-count">Password retry count</label>
+    <input id="profile-security-password-pwquality-retry-count" type="number" min="1" name="password_pwquality_retry_count" class="form-item" value="{{ if .Security.PasswordPolicy.PWQuality.Enable }}{{ .Security.PasswordPolicy.PWQuality.RetryCount }}{{ end }}" placeholder="3" />
+  </div>
+
+  <div class="form-group">
+    <label class="checkbox-label" for="profile-security-password-expiry-enabled">
+      <input id="profile-security-password-expiry-enabled" type="checkbox" name="password_expiry_enabled" value="1"{{ if .Security.PasswordPolicy.Expiry.Enable }} checked{{ end }} />
+      Enable password expiry policy
+    </label>
+    <small class="muted-text">Writes expiry settings to <code>security.loginDefs.settings</code> for new password age defaults.</small>
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-expiry-max-days">Maximum password age (days)</label>
+    <input id="profile-security-password-expiry-max-days" type="number" min="1" name="password_expiry_max_days" class="form-item" value="{{ if .Security.PasswordPolicy.Expiry.Enable }}{{ .Security.PasswordPolicy.Expiry.MaximumDays }}{{ end }}" placeholder="90" />
+  </div>
+
+  <div class="form-group">
+    <label for="profile-security-password-expiry-warning-days">Expiry warning days</label>
+    <input id="profile-security-password-expiry-warning-days" type="number" min="0" name="password_expiry_warning_days" class="form-item" value="{{ if .Security.PasswordPolicy.Expiry.Enable }}{{ .Security.PasswordPolicy.Expiry.WarningDays }}{{ end }}" placeholder="14" />
+  </div>
+
+  <div class="form-group">
+    <label class="checkbox-label" for="profile-security-website-blocking-enabled">
+      <input id="profile-security-website-blocking-enabled" type="checkbox" name="website_blocking_enabled" value="1"{{ if .Security.WebsiteBlocking.Enable }} checked{{ end }} />
+      Enable website blocking
+    </label>
+    <small class="muted-text">Uses <code>networking.stevenblack</code>. When enabled, ads and malware blocking follow the module defaults.</small>
+  </div>
+
+  <div class="form-group">
+    <label>Additional StevenBlack categories</label>
+    <label class="checkbox-label" for="profile-security-website-block-fakenews">
+      <input id="profile-security-website-block-fakenews" type="checkbox" name="website_block_fakenews" value="1"{{ if index .WebsiteBlockingSelections "fakenews" }} checked{{ end }} />
+      Block fake news domains
+    </label>
+    <label class="checkbox-label" for="profile-security-website-block-gambling">
+      <input id="profile-security-website-block-gambling" type="checkbox" name="website_block_gambling" value="1"{{ if index .WebsiteBlockingSelections "gambling" }} checked{{ end }} />
+      Block gambling domains
+    </label>
+    <label class="checkbox-label" for="profile-security-website-block-porn">
+      <input id="profile-security-website-block-porn" type="checkbox" name="website_block_porn" value="1"{{ if index .WebsiteBlockingSelections "porn" }} checked{{ end }} />
+      Block porn domains
+    </label>
+    <label class="checkbox-label" for="profile-security-website-block-social">
+      <input id="profile-security-website-block-social" type="checkbox" name="website_block_social" value="1"{{ if index .WebsiteBlockingSelections "social" }} checked{{ end }} />
+      Block social domains
+    </label>
+    <small class="muted-text">These optional categories are off by default and are applied only when website blocking is enabled.</small>
+  </div>
+
+  <p class="muted-text">Security changes create a new profile revision.</p>
+  <div class="form-actions">
+    <button type="submit" class="btn">Save Security Settings</button>
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+  </div>
+</form>
+{{ end }}

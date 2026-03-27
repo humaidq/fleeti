@@ -54,6 +54,18 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # OpenClaw gateway module and package
+    openclaw = {
+      url = "github:openclaw/nix-openclaw";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # MicroVM host and guest modules
+    microvm = {
+      url = "github:microvm-nix/microvm.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
   };
 
   outputs =

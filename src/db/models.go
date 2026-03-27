@@ -1412,41 +1412,43 @@ func DeleteBuild(ctx context.Context, buildID string) error {
 	return nil
 }
 
-func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, error) {
+func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, string, error) {
 	p := GetPool()
 	if p == nil {
-		return "", "", ErrDatabaseConnectionNotInitialized
+		return "", "", "", ErrDatabaseConnectionNotInitialized
 	}
 
 	buildID = strings.TrimSpace(buildID)
 	if buildID == "" {
-		return "", "", ErrBuildRequired
+		return "", "", "", ErrBuildRequired
 	}
 
 	var configJSON string
 	var fleetID string
+	var rawNix string
 
 	err := p.QueryRow(ctx, `
 		SELECT
 			pr.config_json::text,
+			COALESCE(pr.raw_nix, ''),
 			COALESCE(b.fleet_id::text, '')
 		FROM builds b
 		JOIN profile_revisions pr ON pr.id = b.profile_revision_id
 		WHERE b.id::text = $1
-	`, buildID).Scan(&configJSON, &fleetID)
+	`, buildID).Scan(&configJSON, &rawNix, &fleetID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrBuildNotFound
+		return "", "", "", ErrBuildNotFound
 	}
 
 	if err != nil {
-		return "", "", fmt.Errorf("failed to load build profile execution metadata: %w", err)
+		return "", "", "", fmt.Errorf("failed to load build profile execution metadata: %w", err)
 	}
 
 	if fleetID == "" {
-		return "", "", ErrProfileFleetRequired
+		return "", "", "", ErrProfileFleetRequired
 	}
 
-	return configJSON, fleetID, nil
+	return configJSON, rawNix, fleetID, nil
 }
 
 func CreateBuild(ctx context.Context, input CreateBuildInput) (string, error) {

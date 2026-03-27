@@ -26,7 +26,7 @@ in
       type = types.path;
       description = ''
         Path to environment file containing secrets.
-        Should include BOOTSTRAP_TOKEN and WebAuthn settings.
+        Should include BOOTSTRAP_TOKEN, WebAuthn settings, and any optional OpenRouter AI wizard settings.
       '';
     };
   };

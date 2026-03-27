@@ -14,6 +14,7 @@ var (
 	ErrUserNotFound                     = errors.New("user not found")
 	ErrInvalidUserHandle                = errors.New("invalid user handle")
 	ErrPasskeyNotFound                  = errors.New("passkey not found")
+	ErrAPIKeyNotFound                   = errors.New("api key not found")
 	ErrSetupAlreadyCompleted            = errors.New("setup already completed")
 	ErrInviteInvalidOrUsed              = errors.New("invite is no longer valid")
 	ErrInvalidCreatorID                 = errors.New("invalid creator ID")

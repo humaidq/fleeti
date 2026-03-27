@@ -141,7 +141,7 @@ func TestWriteBuildOverridesModuleSetsKernelPackages(t *testing.T) {
 
 	err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", []string{"vim"}, ProfileKernelConfig{
 		Attr: "linux_6_19",
-	})
+	}, ProfileSecurityConfig{}, false, "")
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestWriteBuildOverridesModuleAddsKernelSourceOverlay(t *testing.T) {
 			Ref:     "refs/tags/v6.19-custom",
 			Rev:     "abcd1234abcd1234abcd1234abcd1234abcd1234",
 		},
-	})
+	}, ProfileSecurityConfig{}, false, "")
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestWriteBuildOverridesModuleWritesKernelPatchesInOrder(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, ProfileSecurityConfig{}, true, "")
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -251,6 +251,10 @@ func TestWriteBuildOverridesModuleWritesKernelPatchesInOrder(t *testing.T) {
 	}
 
 	generated := string(content)
+	if !strings.Contains(generated, "fleeti.services.openclawMicrovm.enable = lib.mkForce true;") {
+		t.Fatalf("expected openclaw microvm override in generated overrides, got: %s", generated)
+	}
+
 	if !strings.Contains(generated, "patchedKernelSource = pkgs.runCommand") {
 		t.Fatalf("expected patched source runCommand block, got: %s", generated)
 	}
@@ -280,5 +284,141 @@ func TestWriteBuildOverridesModuleWritesKernelPatchesInOrder(t *testing.T) {
 
 	if string(secondBytes) != string(firstPatch) {
 		t.Fatalf("unexpected second patch file content: %q", string(secondBytes))
+	}
+}
+
+func TestWriteBuildOverridesModuleImportsProfileRawNixModule(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	rawNix := `{ config, ... }: { services.openssh.settings.PasswordAuthentication = false; }`
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", []string{"vim"}, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, rawNix); err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	overridesBytes, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read build overrides file: %v", err)
+	}
+
+	if !strings.Contains(string(overridesBytes), "./profile-raw-nix.nix") {
+		t.Fatalf("expected build overrides to import profile raw nix module, got: %s", string(overridesBytes))
+	}
+
+	rawModuleBytes, err := os.ReadFile(filepath.Join(modulesDir, "profile-raw-nix.nix"))
+	if err != nil {
+		t.Fatalf("failed to read raw nix module: %v", err)
+	}
+
+	if strings.TrimSpace(string(rawModuleBytes)) != rawNix {
+		t.Fatalf("expected raw nix module to match input, got: %q", string(rawModuleBytes))
+	}
+}
+
+func TestWriteBuildOverridesModuleConfiguresSecurityHardening(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	securityConfig := ProfileSecurityConfig{
+		Configured: true,
+		Firewall: ProfileSecurityFirewallConfig{
+			Enable:          true,
+			AllowedTCPPorts: []int{443, 22, 80},
+			AllowedUDPPorts: []int{53},
+		},
+		BlacklistedKernelModules: []string{"firewire-core", "usb-storage"},
+		AppArmor:                 ProfileSecurityAppArmorConfig{Enable: true},
+		PasswordPolicy: ProfileSecurityPasswordPolicyConfig{
+			PWQuality: ProfileSecurityPWQualityConfig{
+				Enable:        true,
+				MinimumLength: 14,
+				MinimumDigits: 1,
+				MinimumUpper:  1,
+				MinimumLower:  1,
+				MinimumOther:  1,
+				RetryCount:    3,
+			},
+			Expiry: ProfileSecurityPasswordExpiryConfig{
+				Enable:      true,
+				MaximumDays: 90,
+				WarningDays: 14,
+			},
+		},
+		WebsiteBlocking: ProfileSecurityWebsiteBlockingConfig{
+			Enable:          true,
+			BlockCategories: []string{"social", "porn"},
+		},
+	}
+
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, securityConfig, false, ""); err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read generated build overrides file: %v", err)
+	}
+
+	generated := string(content)
+	if !strings.Contains(generated, "networking.firewall.enable = lib.mkForce true;") {
+		t.Fatalf("expected firewall enable override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "networking.firewall.allowedTCPPorts = lib.mkForce [ 22 80 443 ];") {
+		t.Fatalf("expected normalized TCP ports override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "networking.firewall.allowedUDPPorts = lib.mkForce [ 53 ];") {
+		t.Fatalf("expected UDP ports override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `boot.blacklistedKernelModules = lib.mkForce [ "firewire-core" "usb-storage" ];`) {
+		t.Fatalf("expected blacklisted kernel modules override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "security.apparmor.enable = lib.mkForce true;") {
+		t.Fatalf("expected apparmor enable override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "security.apparmor.packages = lib.mkForce (with pkgs; [ apparmor-utils apparmor-profiles ]);") {
+		t.Fatalf("expected apparmor package override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `security.pam.services.passwd.rules.password.pwquality = {`) {
+		t.Fatalf("expected passwd pwquality override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `modulePath = "${pkgs.libpwquality.lib}/lib/security/pam_pwquality.so";`) {
+		t.Fatalf("expected pwquality module path, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "minlen = 14;") || !strings.Contains(generated, "retry = 3;") {
+		t.Fatalf("expected pwquality settings, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "security.loginDefs.settings.PASS_MAX_DAYS = lib.mkForce 90;") {
+		t.Fatalf("expected password max age override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "security.loginDefs.settings.PASS_WARN_AGE = lib.mkForce 14;") {
+		t.Fatalf("expected password warning age override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, "networking.stevenblack.enable = lib.mkForce true;") {
+		t.Fatalf("expected website blocking enable override, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `networking.stevenblack.block = lib.mkForce [ "porn" "social" ];`) {
+		t.Fatalf("expected normalized website blocking categories, got: %s", generated)
 	}
 }

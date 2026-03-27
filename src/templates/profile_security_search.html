@@ -1,0 +1,103 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>AI Security Search</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}/security" class="btn">Open Manual Security</a>
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<div class="profile-security-search-layout">
+  <section class="section-card profile-security-search-hero-card">
+    <div class="profile-security-search-card-header">
+      <div>
+        <h3>Goal-Driven Candidate Search</h3>
+        <p class="muted-text">Describe the operating system role and constraints, then let Fleeti generate and evaluate multiple security candidates in the background.</p>
+      </div>
+      <span class="profile-security-search-chip">24 candidate target</span>
+    </div>
+
+    {{ if not .ProfileSecuritySearchAvailable }}
+    <div class="alert alert-yellow">
+      <h5 class="alert-title">AI Search Unavailable</h5>
+      <p>{{ .ProfileSecuritySearchDisabledReason }}</p>
+    </div>
+    {{ end }}
+
+    <div data-profile-security-search-root data-profile-security-search-url="{{ .ProfileSecuritySearchPath }}">
+      <div class="form-group">
+        <label for="profile-security-search-goal">Operating system goal</label>
+        <textarea id="profile-security-search-goal" class="form-item profile-security-search-goal-input" rows="5" data-profile-security-search-goal {{ if not .ProfileSecuritySearchAvailable }}disabled{{ end }} placeholder="Example: Internet-facing web server with SSH and HTTPS only, strong password policy, AppArmor enabled, and website blocking for social domains."></textarea>
+        <small class="muted-text">Mention services that must stay reachable, ports you know are required, and hardening constraints like password policy, AppArmor, or content filtering.</small>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn" data-profile-security-search-button {{ if not .ProfileSecuritySearchAvailable }}disabled{{ end }}>Start Security Search</button>
+      </div>
+
+      <div class="profile-security-search-status-panel" data-profile-security-search-status></div>
+      <div class="profile-security-search-results" data-profile-security-search-results></div>
+    </div>
+  </section>
+
+  <aside class="section-card profile-security-search-side-card">
+    <div class="profile-security-search-card-header">
+      <div>
+        <h3>Current Profile Snapshot</h3>
+        <p class="muted-text">The evaluator keeps the existing profile context and scores each candidate against a fixed validation path.</p>
+      </div>
+    </div>
+
+    <div class="profile-security-search-summary-grid">
+      <div class="profile-security-search-summary-item">
+        <span class="profile-security-search-summary-label">Current summary</span>
+        <span class="profile-security-search-summary-value">{{ .SecuritySummary }}</span>
+      </div>
+      <div class="profile-security-search-summary-item">
+        <span class="profile-security-search-summary-label">Manual review</span>
+        <span class="profile-security-search-summary-value">Candidates only change the form after you choose one.</span>
+      </div>
+      <div class="profile-security-search-summary-item">
+        <span class="profile-security-search-summary-label">Fixed evaluator</span>
+        <span class="profile-security-search-summary-value">Config validation, required-port checks, and pinned Nix evaluation.</span>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<section class="section-card profile-security-search-editor-card wizard-form-block">
+  <div class="profile-security-search-card-header">
+    <div>
+      <h3>Security Editor</h3>
+      <p class="muted-text">Apply a candidate into this form, refine anything manually, then save a new profile revision.</p>
+    </div>
+  </div>
+  {{ template "profile_security_form" . }}
+</section>
+
+<script src="/profile_security.js" defer></script>
+{{ template "foot" . }}

@@ -98,26 +98,7 @@ func BuildLogLive(c flamego.Context) {
 		return
 	}
 
-	hasMore := false
-	if len(chunks) > buildLogBatchLimit {
-		hasMore = true
-		chunks = chunks[:buildLogBatchLimit]
-	}
-
-	nextAfter := afterID
-	var output strings.Builder
-
-	for _, chunk := range chunks {
-		output.WriteString(chunk.Content)
-		nextAfter = chunk.ID
-	}
-
-	payload := buildLogLiveResponse{
-		Status:    build.Status,
-		Chunk:     output.String(),
-		NextAfter: nextAfter,
-		Done:      isTerminalBuildStatus(build.Status) && !hasMore,
-	}
+	payload := buildLogPayload(build.Status, afterID, chunks, isTerminalBuildStatus(build.Status))
 
 	header := c.ResponseWriter().Header()
 	header.Set("Content-Type", "application/json; charset=utf-8")
@@ -198,26 +179,7 @@ func BuildInstallerLogLive(c flamego.Context) {
 		return
 	}
 
-	hasMore := false
-	if len(chunks) > buildLogBatchLimit {
-		hasMore = true
-		chunks = chunks[:buildLogBatchLimit]
-	}
-
-	nextAfter := afterID
-	var output strings.Builder
-
-	for _, chunk := range chunks {
-		output.WriteString(chunk.Content)
-		nextAfter = chunk.ID
-	}
-
-	payload := buildLogLiveResponse{
-		Status:    build.InstallerStatus,
-		Chunk:     output.String(),
-		NextAfter: nextAfter,
-		Done:      isTerminalInstallerBuildStatus(build.InstallerStatus) && !hasMore,
-	}
+	payload := buildLogPayload(build.InstallerStatus, afterID, chunks, isTerminalInstallerBuildStatus(build.InstallerStatus))
 
 	header := c.ResponseWriter().Header()
 	header.Set("Content-Type", "application/json; charset=utf-8")
@@ -243,6 +205,29 @@ func parseAfterID(raw string) (int64, error) {
 	}
 
 	return value, nil
+}
+
+func buildLogPayload(status string, afterID int64, chunks []db.BuildLogChunk, terminal bool) buildLogLiveResponse {
+	hasMore := false
+	if len(chunks) > buildLogBatchLimit {
+		hasMore = true
+		chunks = chunks[:buildLogBatchLimit]
+	}
+
+	nextAfter := afterID
+	var output strings.Builder
+
+	for _, chunk := range chunks {
+		output.WriteString(chunk.Content)
+		nextAfter = chunk.ID
+	}
+
+	return buildLogLiveResponse{
+		Status:    status,
+		Chunk:     output.String(),
+		NextAfter: nextAfter,
+		Done:      terminal && !hasMore,
+	}
 }
 
 func isTerminalBuildStatus(status string) bool {

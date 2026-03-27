@@ -1,0 +1,84 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>{{ .ProfileWizardTitle }}</h2>
+  <div class="page-header-actions">
+    <a href="{{ .ProfileWizardBackPath }}" class="btn">Manual View</a>
+    <a href="/profiles" class="btn">Profiles</a>
+  </div>
+</div>
+
+{{ if .Profile }}
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">Current revision: r{{ .Profile.LatestRevision }}</p>
+  {{ template "profile_nav" . }}
+</section>
+{{ end }}
+
+{{ if not .ProfileWizardAvailable }}
+<section class="alert alert-yellow">
+  <h5 class="alert-title">AI Wizard Unavailable</h5>
+  <p>{{ .ProfileWizardDisabledReason }}</p>
+</section>
+{{ end }}
+
+<div class="profile-wizard-layout" data-profile-wizard-root>
+  <section class="section-card profile-wizard-chat-card">
+    <div class="profile-wizard-card-header">
+      <div>
+        <h3>Chat</h3>
+        <p class="muted-text">Describe requirements, changes, and constraints in plain language.</p>
+      </div>
+    </div>
+
+    <div class="profile-wizard-chat-log" data-profile-wizard-chat aria-live="polite"></div>
+
+    <form class="profile-wizard-input-form" data-profile-wizard-form>
+      <div class="form-group">
+        <label for="profile-wizard-message">Your message</label>
+        <textarea id="profile-wizard-message" class="form-item" rows="4" {{ if not .ProfileWizardAvailable }}disabled{{ end }}></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn" data-profile-wizard-send {{ if not .ProfileWizardAvailable }}disabled{{ end }}>Send</button>
+        <button type="button" class="btn" data-profile-wizard-discard>Discard Draft</button>
+      </div>
+    </form>
+  </section>
+
+  <aside class="section-card profile-wizard-draft-card">
+    <div class="profile-wizard-card-header">
+      <div>
+        <h3>Draft Preview</h3>
+        <p class="muted-text">Review the current draft before applying it.</p>
+      </div>
+    </div>
+
+    <div data-profile-wizard-validation></div>
+    <div class="profile-wizard-draft-summary" data-profile-wizard-draft></div>
+
+    <div class="form-actions">
+      <button type="button" class="btn" data-profile-wizard-apply>Apply</button>
+      <a href="{{ .ProfileWizardBackPath }}" class="btn">Open Manual View</a>
+    </div>
+  </aside>
+</div>
+
+<textarea id="profile-wizard-state" class="hidden">{{ .ProfileWizardStateJSON }}</textarea>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/marked.min.js" defer></script>
+<script src="/profile_wizard.js" defer></script>
+
+{{ template "foot" . }}

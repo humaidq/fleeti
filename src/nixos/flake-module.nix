@@ -23,6 +23,9 @@ in
 {
   flake.nixosConfigurations.${hostName} = inputs.nixpkgs.lib.nixosSystem {
     system = hostSystem;
+    specialArgs = {
+      inherit inputs;
+    };
     modules = [
       ./modules/default.nix
       { nixpkgs.hostPlatform = hostSystem; }

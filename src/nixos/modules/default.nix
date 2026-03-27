@@ -13,6 +13,7 @@
     ./filesystems.nix
     ./image.nix
     ./build-overrides.nix
+    ./openclaw-microvm.nix
     ./update.nix
     ./update-package.nix
   ];

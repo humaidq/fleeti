@@ -33,6 +33,7 @@ const (
 	installerArtifactsDir   = "installer"
 	buildOverridesPath      = "modules/build-overrides.nix"
 	kernelPatchesDirPath    = "modules/kernel-patches"
+	profileRawNixModulePath = "modules/profile-raw-nix.nix"
 	buildLogFlushSize       = 4096
 	updateBuildTarget       = ".#fleeti-update"
 	installerBuildTarget    = ".#fleeti-installer"
@@ -159,7 +160,7 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
-	profileConfigJSON, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	profileConfigJSON, rawNix, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
@@ -174,11 +175,21 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("failed to parse profile kernel config: %w", err)
 	}
 
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profileConfigJSON)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse profile openclaw microvm setting: %w", err)
+	}
+
+	securityConfig, err := profileSecurityConfigFromProfileConfig(profileConfigJSON)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse profile security config: %w", err)
+	}
+
 	if err := validateProfileKernelConfig(kernelConfig, nil); err != nil {
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
 	}
 
-	if err := writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID, packages, kernelConfig); err != nil {
+	if err := writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, rawNix); err != nil {
 		return "", err
 	}
 
@@ -210,7 +221,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", db.ErrBuildNotReadyForInstaller
 	}
 
-	profileConfigJSON, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	profileConfigJSON, rawNix, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
@@ -223,6 +234,16 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 	kernelConfig, err := profileKernelConfigFromProfileConfig(profileConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile kernel config: %w", err)
+	}
+
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profileConfigJSON)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse profile openclaw microvm setting: %w", err)
+	}
+
+	securityConfig, err := profileSecurityConfigFromProfileConfig(profileConfigJSON)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse profile security config: %w", err)
 	}
 
 	if err := validateProfileKernelConfig(kernelConfig, nil); err != nil {
@@ -250,7 +271,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
-	if err := writeBuildOverridesModule(workspaceNixOSDir, build.Version, fleetID, packages, kernelConfig); err != nil {
+	if err := writeBuildOverridesModule(workspaceNixOSDir, build.Version, fleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, rawNix); err != nil {
 		return "", err
 	}
 
@@ -533,7 +554,7 @@ func (w *persistentBuildLogWriter) flushLocked() {
 	}
 }
 
-func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, packages []string, kernelConfig ProfileKernelConfig) error {
+func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, packages []string, kernelConfig ProfileKernelConfig, securityConfig ProfileSecurityConfig, openclawMicroVMEnabled bool, rawNix string) error {
 	packageExpressions, err := buildPackageExpressions(packages)
 	if err != nil {
 		return fmt.Errorf("failed to build package expressions: %w", err)
@@ -543,6 +564,8 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	if err != nil {
 		return fmt.Errorf("failed to build kernel overrides: %w", err)
 	}
+
+	securityOverridesBlock := buildSecurityOverridesBlock(securityConfig)
 
 	fleetID = strings.TrimSpace(fleetID)
 	if fleetID == "" {
@@ -557,23 +580,56 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 		packageLines = "    " + strings.Join(packageExpressions, "\n    ") + "\n"
 	}
 
+	openclawMicroVMEnabledLiteral := "false"
+	if openclawMicroVMEnabled {
+		openclawMicroVMEnabledLiteral = "true"
+	}
+
+	if err := writeProfileRawNixModule(workspaceNixOSDir, rawNix); err != nil {
+		return err
+	}
+
 	overridesModulePath := filepath.Join(workspaceNixOSDir, buildOverridesPath)
-	overridesModuleBody := fmt.Sprintf(`{ lib, pkgs, ... }:
+	overridesModuleBody := fmt.Sprintf(`{ config, lib, pkgs, ... }:
 {
+	imports = [
+		./profile-raw-nix.nix
+	];
+
 	system.image.version = "%s";
+
+	fleeti.services.openclawMicrovm.enable = lib.mkForce %s;
 
 	systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "%s";
 	systemd.sysupdate.transfers."20-boot-image".Source.Path = lib.mkForce "%s";
 
 	%s
 
+	%s
+
 	environment.systemPackages = with pkgs; [
 %s  ];
 }
-`, escapeNixString(buildVersion), escapeNixString(updateSourcePath), escapeNixString(updateSourcePath), kernelOverridesBlock, packageLines)
+`, escapeNixString(buildVersion), openclawMicroVMEnabledLiteral, escapeNixString(updateSourcePath), escapeNixString(updateSourcePath), kernelOverridesBlock, securityOverridesBlock, packageLines)
 
 	if err := os.WriteFile(overridesModulePath, []byte(overridesModuleBody), 0o640); err != nil {
 		return fmt.Errorf("failed to write build overrides module: %w", err)
+	}
+
+	return nil
+}
+
+func writeProfileRawNixModule(workspaceNixOSDir, rawNix string) error {
+	rawNixModulePath := filepath.Join(workspaceNixOSDir, profileRawNixModulePath)
+	rawNix = strings.TrimSpace(rawNix)
+	if rawNix == "" {
+		rawNix = "_: { }"
+	}
+
+	rawNix += "\n"
+
+	if err := os.WriteFile(rawNixModulePath, []byte(rawNix), 0o640); err != nil {
+		return fmt.Errorf("failed to write profile raw nix module: %w", err)
 	}
 
 	return nil

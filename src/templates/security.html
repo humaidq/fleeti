@@ -68,6 +68,62 @@
 <p class="muted-text">No passkeys registered.</p>
 {{ end }}
 
+<div class="section-heading">API Keys</div>
+
+{{ if .APIKeyError }}
+<div class="alert alert-red">
+  <h5 class="alert-title">Error</h5>
+  <p>{{ .APIKeyError }}</p>
+</div>
+{{ end }}
+
+{{ if .GeneratedAPIKey }}
+<div class="alert alert-green">
+  <h5 class="alert-title">API key generated</h5>
+  <p>{{ if .GeneratedAPIKeyLabel }}{{ .GeneratedAPIKeyLabel }} is ready to use.{{ else }}Your new API key is ready to use.{{ end }}</p>
+  <p>This value is only shown once. Copy it now.</p>
+  <p><code>{{ .GeneratedAPIKey }}</code></p>
+  <p><code>curl -H "Authorization: Bearer {{ .GeneratedAPIKey }}" "{{ .APIProfilesURL }}"</code></p>
+</div>
+{{ end }}
+
+<form method="POST" action="/security/api-keys" class="form-group">
+  <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+  <label for="api-key-label" class="item-title">New API key label (optional)</label>
+  <input type="text" id="api-key-label" name="label" class="form-item" placeholder="CI job, local script" />
+  <p class="muted-text">API keys inherit your account access and can list only the profiles you can already see.</p>
+  <div class="form-group">
+    <button type="submit" class="btn">Generate API key</button>
+  </div>
+</form>
+
+{{ if .APIKeys }}
+<div class="list-card-list">
+  {{ range .APIKeys }}
+  <div class="list-card">
+    <div class="list-card-title">{{ .Label }}</div>
+    <div class="list-card-meta">
+      {{ if .Preview }}<span class="muted-text">Key {{ .Preview }}</span>{{ end }}
+      <span class="muted-text">Created {{ .CreatedAt.Format "Jan 2, 2006" }}</span>
+      {{ if .LastUsed }}
+      <span class="muted-text" title="{{ .LastUsed.Format "Jan 2, 2006 15:04" }}">Last used {{ .LastUsed.Format "Jan 2, 2006" }}</span>
+      {{ else }}
+      <span class="muted-text">Never used</span>
+      {{ end }}
+    </div>
+    <div class="list-card-meta">
+      <form method="POST" action="/security/api-keys/{{ .ID }}/delete" class="inline-form" onsubmit="return confirm('Delete this API key?');">
+        <input type="hidden" name="_csrf" value="{{ $.csrf_token }}" />
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    </div>
+  </div>
+  {{ end }}
+</div>
+{{ else }}
+<p class="muted-text">No API keys generated yet.</p>
+{{ end }}
+
 <script src="/webauthn.js" defer></script>
 
 {{ if .IsAdmin }}

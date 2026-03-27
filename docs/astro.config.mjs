@@ -1,11 +1,31 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
+import starlightOpenAPI, { createOpenAPISidebarGroup } from 'starlight-openapi';
+
+const httpAPISidebarGroup = createOpenAPISidebarGroup();
 
 // https://astro.build/config
 export default defineConfig({
 	integrations: [
 		starlight({
+			plugins: [
+				starlightOpenAPI([
+					{
+						base: 'api/fleeti',
+						schema: './src/openapi/fleeti-v1.openapi.yaml',
+						sidebar: {
+							label: 'HTTP API',
+							collapsed: false,
+							group: httpAPISidebarGroup,
+							operations: {
+								badges: true,
+								labels: 'summary',
+							},
+						},
+					},
+				]),
+			],
 			title: 'Fleeti',
 			customCss: ['/src/styles/landing.css'],
 			components: {
@@ -23,7 +43,7 @@ export default defineConfig({
 				},
 				{
 					label: 'Reference',
-					items: [{ label: 'Runtime Reference', slug: 'reference/example' }],
+					items: [{ label: 'Runtime Reference', slug: 'reference/example' }, httpAPISidebarGroup],
 				},
 			],
 		}),

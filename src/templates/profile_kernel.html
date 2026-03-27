@@ -32,7 +32,7 @@
 
 <section class="section-card">
   <h3>Kernel Settings</h3>
-  <form method="post" action="/profiles/{{ .Profile.ID }}/kernel" enctype="multipart/form-data">
+  <form id="profile-kernel-form" method="post" action="/profiles/{{ .Profile.ID }}/kernel" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
     <div class="form-group">
       <label for="profile-kernel-attr">Kernel Version</label>
@@ -66,47 +66,46 @@
     {{ if .KernelSourcePatches }}
     <div class="form-group">
       <label>Existing Kernel Patches</label>
-      <div class="table-card">
-        <table class="contacts-list responsive-stack-table">
-          <thead>
-            <tr>
-              <th>Patch</th>
-              <th>SHA256</th>
-              <th>Order</th>
-              <th>Remove</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{ range $i, $patch := .KernelSourcePatches }}
-            <tr>
-              <td data-label="Patch"><code>{{ $patch.Name }}</code></td>
-              <td data-label="SHA256"><code>{{ $patch.SHA256 }}</code></td>
-              <td data-label="Order">
-                <input type="number" min="1" name="kernel_existing_patch_order_{{ $i }}" class="form-item" value="{{ printf "%d" $i }}" data-kernel-existing-order />
-              </td>
-              <td data-label="Remove">
-                <label class="checkbox-label">
-                  <input type="checkbox" name="kernel_existing_patch_remove_{{ $i }}" value="1" />
-                  Remove
-                </label>
-              </td>
-            </tr>
-            {{ end }}
-          </tbody>
-        </table>
+      <div id="profile-kernel-patch-list" class="kernel-patch-list">
+        {{ range $i, $patch := .KernelSourcePatches }}
+        <div class="kernel-patch-item" data-kernel-patch-item>
+          <input type="hidden" name="kernel_existing_patch_order_{{ $i }}" value="{{ printf "%d" $i }}" data-kernel-existing-order />
+          <div class="kernel-patch-order" data-kernel-order-label></div>
+          <div class="kernel-patch-main">
+            <p class="kernel-patch-name"><code>{{ $patch.Name }}</code></p>
+            <p class="kernel-patch-sha">SHA256: <code>{{ $patch.SHA256 }}</code></p>
+          </div>
+          <div class="kernel-patch-actions">
+            <button type="button" class="btn kernel-patch-move-btn" data-kernel-move-up aria-label="Move {{ $patch.Name }} up">
+              <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+              Up
+            </button>
+            <button type="button" class="btn kernel-patch-move-btn" data-kernel-move-down aria-label="Move {{ $patch.Name }} down">
+              <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+              Down
+            </button>
+            <input type="hidden" name="kernel_existing_patch_remove_{{ $i }}" value="" data-kernel-remove-value />
+            <button type="button" class="btn kernel-patch-remove-btn" data-kernel-remove-button aria-pressed="false">
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              Remove
+            </button>
+          </div>
+        </div>
+        {{ end }}
       </div>
-      <small class="muted-text">Existing patches are kept unless removed. Lower order is applied first.</small>
+      <small class="muted-text">Use up/down to reorder patches. Lower order is applied first.</small>
     </div>
     {{ end }}
     <div class="form-group">
       <label for="profile-kernel-patch-files">Upload Kernel Patches (optional)</label>
-      <input id="profile-kernel-patch-files" type="file" name="kernel_patch_files" class="form-item" multiple accept=".patch,.diff,text/x-patch,text/plain" />
-      <small class="muted-text">Upload patch files and set apply order below. Patches are applied in ascending order number.</small>
-    </div>
-    <div class="form-group hidden" id="profile-kernel-new-patch-orders" data-existing-patch-count="{{ len .KernelSourcePatches }}">
-      <label>New Patch Order</label>
-      <div id="profile-kernel-new-patch-order-list"></div>
-      <small class="muted-text">When order numbers match, files keep upload order.</small>
+      <div id="profile-kernel-upload-dropzone" class="upload-dropzone" role="button" tabindex="0" aria-describedby="profile-kernel-upload-help profile-kernel-upload-status">
+        <input id="profile-kernel-patch-files" type="file" name="kernel_patch_files" class="upload-input-hidden" multiple accept=".patch,.diff,text/x-patch,text/plain" />
+        <div class="upload-dropzone-icon" aria-hidden="true"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+        <p class="upload-dropzone-title">Drag and drop patch files here</p>
+        <p class="upload-dropzone-meta">or <button id="profile-kernel-upload-button" type="button" class="btn">Choose files</button></p>
+      </div>
+      <p id="profile-kernel-upload-status" class="muted-text upload-dropzone-status" aria-live="polite">Files upload immediately after selection.</p>
+      <small id="profile-kernel-upload-help" class="muted-text">Accepts .patch and .diff files (max 32 files, 512 KiB each, 4 MiB total). New files are appended in upload order.</small>
     </div>
     <p class="muted-text">Kernel changes create a new profile revision.</p>
     <div class="form-actions">
@@ -118,56 +117,319 @@
 
 <script>
   (function () {
+    var form = document.getElementById("profile-kernel-form");
     var fileInput = document.getElementById("profile-kernel-patch-files");
-    var orderContainer = document.getElementById("profile-kernel-new-patch-orders");
-    var orderList = document.getElementById("profile-kernel-new-patch-order-list");
+    var dropzone = document.getElementById("profile-kernel-upload-dropzone");
+    var uploadButton = document.getElementById("profile-kernel-upload-button");
+    var uploadStatus = document.getElementById("profile-kernel-upload-status");
+    var sourceOverrideEnabled = document.getElementById("profile-kernel-source-override-enabled");
+    var kernelAttr = document.getElementById("profile-kernel-attr");
+    var sourceURL = document.getElementById("profile-kernel-source-url");
+    var sourceRev = document.getElementById("profile-kernel-source-rev");
 
-    if (!fileInput || !orderContainer || !orderList) {
+    if (!form || !fileInput || !dropzone || !uploadButton || !uploadStatus) {
       return;
     }
 
-    var existingCountRaw = orderContainer.getAttribute("data-existing-patch-count") || "0";
-    var existingCount = parseInt(existingCountRaw, 10);
-    if (!Number.isFinite(existingCount) || existingCount < 0) {
-      existingCount = 0;
-    }
+    var isSubmitting = false;
+    var dragDepth = 0;
 
-    function renderOrderFields() {
-      var files = fileInput.files;
-      orderList.innerHTML = "";
-
-      if (!files || files.length === 0) {
-        orderContainer.classList.add("hidden");
+    function setUploadStatus(text, isError) {
+      uploadStatus.textContent = text;
+      if (isError) {
+        uploadStatus.classList.add("upload-dropzone-status-error");
         return;
       }
 
-      orderContainer.classList.remove("hidden");
+      uploadStatus.classList.remove("upload-dropzone-status-error");
+    }
 
-      for (var i = 0; i < files.length; i++) {
-        var row = document.createElement("div");
-        row.className = "form-group";
+    function sourceOverrideReadyForUpload() {
+      if (!sourceOverrideEnabled || !kernelAttr || !sourceURL || !sourceRev) {
+        return true;
+      }
 
-        var label = document.createElement("label");
-        label.textContent = files[i].name + " order";
-        row.appendChild(label);
+      if (sourceOverrideEnabled.checked && kernelAttr.value !== "" && sourceURL.value.trim() !== "" && sourceRev.value.trim() !== "") {
+        return true;
+      }
 
-        var input = document.createElement("input");
-        input.type = "number";
-        input.name = "kernel_new_patch_order";
-        input.className = "form-item";
-        input.min = "1";
-        input.value = String(existingCount + i + 1);
-        row.appendChild(input);
+      return false;
+    }
 
-        orderList.appendChild(row);
+    function validateSourceOverrideForUpload() {
+      if (sourceOverrideReadyForUpload()) {
+        return true;
+      }
+
+      setUploadStatus("Enable source override and fill kernel version, source URL, and source revision before uploading patches.", true);
+      return false;
+    }
+
+    function submitUpload() {
+      if (isSubmitting) {
+        return;
+      }
+
+      var files = fileInput.files;
+      if (!files || files.length === 0) {
+        return;
+      }
+
+      if (!validateSourceOverrideForUpload()) {
+        return;
+      }
+
+      isSubmitting = true;
+      dropzone.classList.add("upload-dropzone-uploading");
+      dropzone.setAttribute("aria-busy", "true");
+      uploadButton.disabled = true;
+      setUploadStatus("Uploading " + files.length + " patch file" + (files.length === 1 ? "" : "s") + "...", false);
+
+      if (typeof form.requestSubmit === "function") {
+        form.requestSubmit();
+        return;
+      }
+
+      form.submit();
+    }
+
+    function preventDefaults(event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    function openFilePicker() {
+      if (isSubmitting) {
+        return;
+      }
+
+      fileInput.click();
+    }
+
+    uploadButton.addEventListener("click", function (event) {
+      event.preventDefault();
+      openFilePicker();
+    });
+
+    dropzone.addEventListener("click", function (event) {
+      if (event.target === uploadButton) {
+        return;
+      }
+
+      openFilePicker();
+    });
+
+    dropzone.addEventListener("keydown", function (event) {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      openFilePicker();
+    });
+
+    dropzone.addEventListener("dragenter", function (event) {
+      preventDefaults(event);
+      if (isSubmitting) {
+        return;
+      }
+
+      dragDepth += 1;
+      dropzone.classList.add("upload-dropzone-active");
+    });
+
+    dropzone.addEventListener("dragover", function (event) {
+      preventDefaults(event);
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+    });
+
+    dropzone.addEventListener("dragleave", function (event) {
+      preventDefaults(event);
+      if (isSubmitting) {
+        return;
+      }
+
+      dragDepth -= 1;
+      if (dragDepth <= 0) {
+        dragDepth = 0;
+        dropzone.classList.remove("upload-dropzone-active");
+      }
+    });
+
+    dropzone.addEventListener("drop", function (event) {
+      preventDefaults(event);
+      if (isSubmitting) {
+        return;
+      }
+
+      dragDepth = 0;
+      dropzone.classList.remove("upload-dropzone-active");
+
+      if (!event.dataTransfer || !event.dataTransfer.files || event.dataTransfer.files.length === 0) {
+        return;
+      }
+
+      try {
+        fileInput.files = event.dataTransfer.files;
+      } catch (error) {
+        setUploadStatus("Drag-and-drop is not supported in this browser. Use Choose files.", true);
+        return;
+      }
+
+      submitUpload();
+    });
+
+    fileInput.addEventListener("change", submitUpload);
+
+    function handleUploadPrerequisiteChange() {
+      if (!fileInput.files || fileInput.files.length === 0) {
+        setUploadStatus("Files upload immediately after selection.", false);
+        return;
+      }
+
+      if (!sourceOverrideReadyForUpload()) {
+        return;
+      }
+
+      submitUpload();
+    }
+
+    if (sourceOverrideEnabled) {
+      sourceOverrideEnabled.addEventListener("change", handleUploadPrerequisiteChange);
+    }
+
+    if (kernelAttr) {
+      kernelAttr.addEventListener("change", handleUploadPrerequisiteChange);
+    }
+
+    if (sourceURL) {
+      sourceURL.addEventListener("input", handleUploadPrerequisiteChange);
+    }
+
+    if (sourceRev) {
+      sourceRev.addEventListener("input", handleUploadPrerequisiteChange);
+    }
+
+    var patchList = document.getElementById("profile-kernel-patch-list");
+
+    function syncExistingPatchOrder() {
+      if (!patchList) {
+        return;
+      }
+
+      var patchItems = patchList.querySelectorAll("[data-kernel-patch-item]");
+      for (var i = 0; i < patchItems.length; i++) {
+        var item = patchItems[i];
+        var orderInput = item.querySelector("[data-kernel-existing-order]");
+        var orderLabel = item.querySelector("[data-kernel-order-label]");
+        var moveUp = item.querySelector("[data-kernel-move-up]");
+        var moveDown = item.querySelector("[data-kernel-move-down]");
+        if (orderInput) {
+          orderInput.value = String(i + 1);
+        }
+
+        if (orderLabel) {
+          orderLabel.textContent = "#" + String(i + 1);
+        }
+
+        if (moveUp) {
+          moveUp.disabled = i === 0;
+        }
+
+        if (moveDown) {
+          moveDown.disabled = i === patchItems.length - 1;
+        }
       }
     }
 
-    fileInput.addEventListener("change", renderOrderFields);
+    function movePatchItem(button, direction) {
+      if (!patchList || !button) {
+        return;
+      }
 
-    var existingOrderInputs = document.querySelectorAll("[data-kernel-existing-order]");
-    for (var i = 0; i < existingOrderInputs.length; i++) {
-      existingOrderInputs[i].value = String(i + 1);
+      var item = button.closest("[data-kernel-patch-item]");
+      if (!item) {
+        return;
+      }
+
+      if (direction < 0) {
+        var previous = item.previousElementSibling;
+        if (previous) {
+          patchList.insertBefore(item, previous);
+        }
+
+        syncExistingPatchOrder();
+        return;
+      }
+
+      var next = item.nextElementSibling;
+      if (next) {
+        patchList.insertBefore(next, item);
+      }
+
+      syncExistingPatchOrder();
+    }
+
+    function togglePatchRemoval(button) {
+      if (!button) {
+        return;
+      }
+
+      var item = button.closest("[data-kernel-patch-item]");
+      if (!item) {
+        return;
+      }
+
+      var removeValueInput = item.querySelector("[data-kernel-remove-value]");
+      if (!(removeValueInput instanceof HTMLInputElement)) {
+        return;
+      }
+
+      var isRemoved = item.classList.contains("kernel-patch-item-removed");
+      if (isRemoved) {
+        item.classList.remove("kernel-patch-item-removed");
+        removeValueInput.value = "";
+        button.classList.remove("kernel-patch-remove-btn-active");
+        button.setAttribute("aria-pressed", "false");
+        button.innerHTML = '<i class="fa-solid fa-trash" aria-hidden="true"></i> Remove';
+        return;
+      }
+
+      item.classList.add("kernel-patch-item-removed");
+      removeValueInput.value = "1";
+      button.classList.add("kernel-patch-remove-btn-active");
+      button.setAttribute("aria-pressed", "true");
+      button.innerHTML = '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Undo';
+    }
+
+    if (patchList) {
+      patchList.addEventListener("click", function (event) {
+        var target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+
+        var moveUpButton = target.closest("[data-kernel-move-up]");
+        if (moveUpButton) {
+          movePatchItem(moveUpButton, -1);
+          return;
+        }
+
+        var moveDownButton = target.closest("[data-kernel-move-down]");
+        if (moveDownButton) {
+          movePatchItem(moveDownButton, 1);
+          return;
+        }
+
+        var removeButton = target.closest("[data-kernel-remove-button]");
+        if (removeButton) {
+          togglePatchRemoval(removeButton);
+        }
+      });
+
+      syncExistingPatchOrder();
     }
   })();
 </script>

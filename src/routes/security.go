@@ -27,6 +27,15 @@ type PasskeyInfo struct {
 	LastUsed  *time.Time
 }
 
+// APIKeyInfo represents an API key entry on the security page.
+type APIKeyInfo struct {
+	ID        string
+	Label     string
+	Preview   string
+	CreatedAt time.Time
+	LastUsed  *time.Time
+}
+
 // InviteInfo represents a provisioning invite.
 type InviteInfo struct {
 	ID          string
@@ -38,7 +47,13 @@ type InviteInfo struct {
 	SetupURL    string
 }
 
-// Security renders the security page for passkey and invite management.
+const (
+	generatedAPIKeySessionKey      = "generated_api_key"
+	generatedAPIKeyLabelSessionKey = "generated_api_key_label"
+	adminAPIProfilesURL            = "https://admin.fleeti.ae/api/v1/profiles"
+)
+
+// Security renders the security page for passkey, API key, and invite management.
 func Security(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Security")
 	data["IsSecurity"] = true
@@ -80,6 +95,42 @@ func Security(c flamego.Context, s session.Session, t template.Template, data te
 
 	data["Passkeys"] = passkeyInfos
 	data["PasskeyCount"] = len(passkeyInfos)
+	data["APIProfilesURL"] = adminAPIProfilesURL
+
+	apiKeys, err := db.ListUserAPIKeys(ctx, userID)
+	if err != nil {
+		logger.Error("failed to load api keys", "error", err)
+		data["APIKeyError"] = "Failed to load API keys"
+	} else {
+		apiKeyInfos := make([]APIKeyInfo, 0, len(apiKeys))
+		for i, apiKey := range apiKeys {
+			label := fmt.Sprintf("API key %d", i+1)
+			if apiKey.Label != nil && strings.TrimSpace(*apiKey.Label) != "" {
+				label = strings.TrimSpace(*apiKey.Label)
+			}
+
+			preview := strings.TrimSpace(apiKey.KeyPrefix)
+			if preview != "" {
+				preview += "..."
+			}
+
+			apiKeyInfos = append(apiKeyInfos, APIKeyInfo{
+				ID:        apiKey.ID.String(),
+				Label:     label,
+				Preview:   preview,
+				CreatedAt: apiKey.CreatedAt,
+				LastUsed:  apiKey.LastUsed,
+			})
+		}
+
+		data["APIKeys"] = apiKeyInfos
+	}
+
+	generatedAPIKey, generatedAPIKeyLabel := consumeGeneratedAPIKey(s)
+	if generatedAPIKey != "" {
+		data["GeneratedAPIKey"] = generatedAPIKey
+		data["GeneratedAPIKeyLabel"] = generatedAPIKeyLabel
+	}
 
 	isAdmin, err := resolveSessionIsAdmin(ctx, s)
 	if err != nil {
@@ -193,6 +244,73 @@ func DeletePasskey(c flamego.Context, s session.Session) {
 	}
 
 	SetSuccessFlash(s, "Passkey deleted")
+	c.Redirect("/security", http.StatusSeeOther)
+}
+
+// CreateAPIKey generates a new API key for the current user.
+func CreateAPIKey(c flamego.Context, s session.Session) {
+	userID, ok := getSessionUserID(s)
+	if !ok {
+		SetErrorFlash(s, "Unable to resolve current user")
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		SetErrorFlash(s, "Failed to parse form")
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	label := strings.TrimSpace(c.Request().Form.Get("label"))
+	apiKey, rawKey, err := db.CreateUserAPIKey(c.Request().Context(), userID, label)
+	if err != nil {
+		logger.Error("failed to create api key", "error", err)
+		SetErrorFlash(s, "Failed to generate API key")
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	storeGeneratedAPIKey(s, rawKey, apiKeyDisplayLabel(apiKey.Label))
+	SetSuccessFlash(s, "API key generated")
+	c.Redirect("/security", http.StatusSeeOther)
+}
+
+// DeleteAPIKey removes an API key for the current user.
+func DeleteAPIKey(c flamego.Context, s session.Session) {
+	userID, ok := getSessionUserID(s)
+	if !ok {
+		SetErrorFlash(s, "Unable to resolve current user")
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	apiKeyID := strings.TrimSpace(c.Param("id"))
+	if apiKeyID == "" {
+		SetErrorFlash(s, "Missing API key ID")
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	if err := db.DeleteUserAPIKey(c.Request().Context(), userID, apiKeyID); err != nil {
+		if errors.Is(err, db.ErrAPIKeyNotFound) {
+			SetErrorFlash(s, "API key not found")
+		} else {
+			logger.Error("failed to delete api key", "api_key_id", apiKeyID, "error", err)
+			SetErrorFlash(s, "Failed to delete API key")
+		}
+
+		c.Redirect("/security", http.StatusSeeOther)
+
+		return
+	}
+
+	SetSuccessFlash(s, "API key deleted")
 	c.Redirect("/security", http.StatusSeeOther)
 }
 
@@ -359,4 +477,27 @@ func buildExternalURL(r *flamego.Request, path string) string {
 	}
 
 	return scheme + "://" + host + path
+}
+
+func apiKeyDisplayLabel(label *string) string {
+	if label == nil {
+		return ""
+	}
+
+	return strings.TrimSpace(*label)
+}
+
+func storeGeneratedAPIKey(s session.Session, rawKey string, label string) {
+	s.Set(generatedAPIKeySessionKey, strings.TrimSpace(rawKey))
+	s.Set(generatedAPIKeyLabelSessionKey, strings.TrimSpace(label))
+}
+
+func consumeGeneratedAPIKey(s session.Session) (string, string) {
+	rawKey, _ := s.Get(generatedAPIKeySessionKey).(string)
+	label, _ := s.Get(generatedAPIKeyLabelSessionKey).(string)
+
+	s.Delete(generatedAPIKeySessionKey)
+	s.Delete(generatedAPIKeyLabelSessionKey)
+
+	return strings.TrimSpace(rawKey), strings.TrimSpace(label)
 }

@@ -1,0 +1,53 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>Profile OpenClaw</h2>
+  <div class="page-header-actions">
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
+    <a href="/profiles" class="btn">Back to Profiles</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>{{ .Profile.Name }}</h3>
+  <p class="muted-text">
+    Current revision: r{{ .Profile.LatestRevision }}
+    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
+  </p>
+  {{ template "profile_nav" . }}
+</section>
+
+<section class="section-card">
+  <h3>OpenClaw Settings</h3>
+  <form method="post" action="/profiles/{{ .Profile.ID }}/openclaw">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="form-group">
+      <label class="checkbox-label" for="profile-openclaw-microvm-enabled">
+        <input id="profile-openclaw-microvm-enabled" type="checkbox" name="openclaw_microvm_enabled" value="1"{{ if .OpenClawMicroVMEnabled }} checked{{ end }} />
+        Enable OpenClaw gateway in cloud-hypervisor MicroVM
+      </label>
+      <small class="muted-text">Default is off. When enabled, this profile turns on the OpenClaw MicroVM service for builds.</small>
+      <small class="muted-text">The OpenClaw gateway uses token auth and the MicroVM has internet access.</small>
+    </div>
+    <p class="muted-text">OpenClaw changes create a new profile revision.</p>
+    <div class="form-actions">
+      <button type="submit" class="btn">Save OpenClaw Settings</button>
+      <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+    </div>
+  </form>
+</section>
+
+{{ template "foot" . }}

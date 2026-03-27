@@ -23,7 +23,10 @@ import (
 	"github.com/humaidq/fleeti/v2/db"
 )
 
-const profileKernelMultipartMemoryLimit = 32 << 20
+const (
+	profileKernelMultipartMemoryLimit   = 32 << 20
+	openclawMicroVMEnabledConfigKeyName = "openclaw_microvm_enabled"
+)
 
 func writePlain(c flamego.Context, value string) {
 	if _, err := c.ResponseWriter().Write([]byte(value)); err != nil {
@@ -796,10 +799,26 @@ func ProfilePage(c flamego.Context, s session.Session, t template.Template, data
 		kernelConfig = ProfileKernelConfig{}
 	}
 
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profile.ConfigJSON)
+	if err != nil {
+		logger.Warn("failed to parse profile openclaw microvm config", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, mutationErrorMessage(err))
+		openclawMicroVMEnabled = false
+	}
+
+	securityConfig, err := profileSecurityConfigFromProfileConfig(profile.ConfigJSON)
+	if err != nil {
+		logger.Warn("failed to parse profile security config", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to parse profile security settings")
+		securityConfig = ProfileSecurityConfig{}
+	}
+
 	data["Profile"] = profile
 	data["Packages"] = packages
 	data["PackageCount"] = len(packages)
 	data["KernelSummary"] = profileKernelSummary(kernelConfig)
+	data["OpenClawMicroVMSummary"] = profileOpenclawMicroVMSummary(openclawMicroVMEnabled)
+	data["SecuritySummary"] = profileSecuritySummary(securityConfig)
 	data["HasRawNix"] = strings.TrimSpace(profile.RawNix) != ""
 	data["ProfileNavActive"] = "summary"
 	data["CanManageProfile"] = canManage
@@ -1016,6 +1035,95 @@ func ProfilePackagesPage(c flamego.Context, s session.Session, t template.Templa
 	t.HTML(http.StatusOK, "profile_packages")
 }
 
+// ProfileSecurityPage renders security settings for a profile.
+func ProfileSecurityPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Profile Security")
+	data["IsProfiles"] = true
+
+	profile, _, err := loadProfileSecurityPageData(c, s, data)
+	if err != nil {
+		return
+	}
+
+	data["ProfileNavActive"] = "security"
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Security"))
+
+	t.HTML(http.StatusOK, "profile_security")
+}
+
+// ProfileSecuritySearchPage renders AI-driven security candidate search for a profile.
+func ProfileSecuritySearchPage(c flamego.Context, s session.Session, t template.Template, data template.Data, ai *ProfileWizardAI) {
+	setPage(data, "AI Security Search")
+	data["IsProfiles"] = true
+
+	profile, _, err := loadProfileSecurityPageData(c, s, data)
+	if err != nil {
+		return
+	}
+
+	data["ProfileSecuritySearchPath"] = profileSecuritySearchPath(strings.TrimSpace(profile.ID))
+	data["ProfileSecuritySearchAvailable"] = ai != nil && ai.Enabled()
+	data["ProfileSecuritySearchDisabledReason"] = profileWizardDisabledReason(ai)
+	data["ProfileNavActive"] = "security_search"
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "AI Security Search"))
+
+	t.HTML(http.StatusOK, "profile_security_search")
+}
+
+func loadProfileSecurityPageData(c flamego.Context, s session.Session, data template.Data) (db.ProfileEdit, ProfileSecurityConfig, error) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return db.ProfileEdit{}, ProfileSecurityConfig{}, err
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return db.ProfileEdit{}, ProfileSecurityConfig{}, db.ErrProfileNotFound
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return db.ProfileEdit{}, ProfileSecurityConfig{}, err
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return db.ProfileEdit{}, ProfileSecurityConfig{}, err
+	}
+
+	if !canManage {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return db.ProfileEdit{}, ProfileSecurityConfig{}, db.ErrAccessDenied
+	}
+
+	securityConfig, err := profileSecurityConfigFromProfileConfig(profile.ConfigJSON)
+	if err != nil {
+		logger.Warn("failed to parse profile security config", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, "Failed to parse profile security settings")
+		securityConfig = ProfileSecurityConfig{}
+	}
+
+	data["Profile"] = profile
+	data["Security"] = securityConfig
+	data["FirewallAllowedTCPPortsValue"] = formatProfileSecurityPortList(securityConfig.Firewall.AllowedTCPPorts)
+	data["FirewallAllowedUDPPortsValue"] = formatProfileSecurityPortList(securityConfig.Firewall.AllowedUDPPorts)
+	data["BlacklistedKernelModulesValue"] = strings.Join(securityConfig.BlacklistedKernelModules, "\n")
+	data["WebsiteBlockingSelections"] = profileSecurityWebsiteBlockingSelections(securityConfig.WebsiteBlocking.BlockCategories)
+	data["SecuritySummary"] = profileSecuritySummary(securityConfig)
+	data["CanManageProfile"] = true
+
+	return profile, securityConfig, nil
+}
+
 // ProfileKernelPage renders kernel settings for a profile.
 func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Profile Kernel")
@@ -1131,6 +1239,61 @@ func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Raw Nix"))
 
 	t.HTML(http.StatusOK, "profile_raw_nix")
+}
+
+// ProfileOpenClawPage renders OpenClaw settings for a profile.
+func ProfileOpenClawPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Profile OpenClaw")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canManage {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profile.ConfigJSON)
+	if err != nil {
+		logger.Warn("failed to parse profile openclaw microvm config", "profile_id", profileID, "error", err)
+		setPageErrorFlash(data, mutationErrorMessage(err))
+		openclawMicroVMEnabled = false
+	}
+
+	data["Profile"] = profile
+	data["OpenClawMicroVMEnabled"] = openclawMicroVMEnabled
+	data["ProfileNavActive"] = "openclaw"
+	data["CanManageProfile"] = true
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "OpenClaw"))
+
+	t.HTML(http.StatusOK, "profile_openclaw")
 }
 
 // ProfileDeploymentsPage renders build/release/rollout workflows for a profile.
@@ -1568,6 +1731,18 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
+	evaluation := evaluateProfileInputAgainstPinnedNix(c.Request().Context(), input)
+	if !evaluation.Valid {
+		message := "Raw Nix is invalid for the pinned NixOS flake"
+		if len(evaluation.Errors) > 0 {
+			message = evaluation.Errors[0]
+		}
+
+		redirectWithMessage(c, s, path, FlashError, message)
+
+		return
+	}
+
 	createdNewRevision, err := db.UpdateProfile(c.Request().Context(), profileID, input)
 	if err != nil {
 		if errors.Is(err, db.ErrProfileNotFound) {
@@ -1582,6 +1757,180 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 	message := "Raw Nix updated"
 	if createdNewRevision {
 		message = "Raw Nix updated with new revision"
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, message)
+}
+
+// UpdateProfileSecurity handles profile security setting updates.
+func UpdateProfileSecurity(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	path := profileSecurityPath(profileID)
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			path = "/profiles"
+		}
+
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	securityConfig, err := profileSecurityConfigFromForm(c.Request().Form)
+	if err != nil {
+		redirectWithMessage(c, s, path, FlashError, err.Error())
+
+		return
+	}
+
+	configJSON, err := profileConfigWithSecurity(profile.ConfigJSON, securityConfig)
+	if err != nil {
+		redirectWithMessage(c, s, path, FlashError, err.Error())
+
+		return
+	}
+
+	input := db.CreateProfileInput{
+		FleetIDs:            profile.FleetIDs,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		ConfigJSON:          configJSON,
+		RawNix:              profile.RawNix,
+		ConfigSchemaVersion: profile.ConfigSchemaVersion,
+	}
+
+	createdNewRevision, err := db.UpdateProfile(c.Request().Context(), profileID, input)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			path = "/profiles"
+		}
+
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	message := "Security settings updated"
+	if createdNewRevision {
+		message = "Security settings updated with new revision"
+	}
+
+	redirectWithMessage(c, s, path, FlashSuccess, message)
+}
+
+// UpdateProfileOpenClaw handles profile OpenClaw settings updates.
+func UpdateProfileOpenClaw(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	path := profileOpenclawPath(profileID)
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, path, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			path = "/profiles"
+		}
+
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	if !canManage {
+		handleMutationError(c, s, "/profiles", db.ErrAccessDenied)
+
+		return
+	}
+
+	openclawMicroVMEnabled := strings.TrimSpace(c.Request().Form.Get("openclaw_microvm_enabled")) != ""
+	configJSON, err := profileConfigWithOpenclawMicrovmEnabled(profile.ConfigJSON, openclawMicroVMEnabled)
+	if err != nil {
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	input := db.CreateProfileInput{
+		FleetIDs:            profile.FleetIDs,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		ConfigJSON:          configJSON,
+		RawNix:              profile.RawNix,
+		ConfigSchemaVersion: profile.ConfigSchemaVersion,
+	}
+
+	createdNewRevision, err := db.UpdateProfile(c.Request().Context(), profileID, input)
+	if err != nil {
+		if errors.Is(err, db.ErrProfileNotFound) {
+			path = "/profiles"
+		}
+
+		handleMutationError(c, s, path, err)
+
+		return
+	}
+
+	message := "OpenClaw settings updated"
+	if createdNewRevision {
+		message = "OpenClaw settings updated with new revision"
 	}
 
 	redirectWithMessage(c, s, path, FlashSuccess, message)
@@ -3091,6 +3440,18 @@ func profilePackagesPath(profileID string) string {
 	return "/profiles/" + profileID + "/packages"
 }
 
+func profileSecurityPath(profileID string) string {
+	return "/profiles/" + profileID + "/security"
+}
+
+func profileSecuritySearchPath(profileID string) string {
+	return "/profiles/" + profileID + "/security/search"
+}
+
+func profileSecuritySearchStatusPath(profileID, jobID string) string {
+	return "/profiles/" + profileID + "/security/search/" + jobID
+}
+
 func profilePackagesPathWithQuery(profileID, query string) string {
 	path := profilePackagesPath(profileID)
 	trimmedQuery := strings.TrimSpace(query)
@@ -3107,6 +3468,10 @@ func profileKernelPath(profileID string) string {
 
 func profileRawNixPath(profileID string) string {
 	return "/profiles/" + profileID + "/raw-nix"
+}
+
+func profileOpenclawPath(profileID string) string {
+	return "/profiles/" + profileID + "/openclaw"
 }
 
 func profileSectionBreadcrumbs(profile db.ProfileEdit, section string) []BreadcrumbItem {
@@ -3301,6 +3666,14 @@ func profileKernelSummary(kernelConfig ProfileKernelConfig) string {
 	}
 
 	return summary
+}
+
+func profileOpenclawMicroVMSummary(enabled bool) string {
+	if enabled {
+		return "Enabled"
+	}
+
+	return "Disabled"
 }
 
 func selectedFleetIDsFromForm(values url.Values) []string {
@@ -3577,6 +3950,45 @@ func profileConfigWithPackages(configJSON string, packages []string) (string, er
 	}
 
 	config["packages"] = normalizePackageList(packages)
+
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+
+	return string(encoded), nil
+}
+
+func openclawMicrovmEnabledFromProfileConfig(configJSON string) (bool, error) {
+	config, err := parseProfileConfig(configJSON)
+	if err != nil {
+		return false, err
+	}
+
+	rawValue, exists := config[openclawMicroVMEnabledConfigKeyName]
+	if !exists || rawValue == nil {
+		return false, nil
+	}
+
+	enabled, ok := rawValue.(bool)
+	if !ok {
+		return false, db.ErrInvalidProfileConfigJSON
+	}
+
+	return enabled, nil
+}
+
+func profileConfigWithOpenclawMicrovmEnabled(configJSON string, enabled bool) (string, error) {
+	config, err := parseProfileConfig(configJSON)
+	if err != nil {
+		return "", err
+	}
+
+	if enabled {
+		config[openclawMicroVMEnabledConfigKeyName] = true
+	} else {
+		delete(config, openclawMicroVMEnabledConfigKeyName)
+	}
 
 	encoded, err := json.Marshal(config)
 	if err != nil {
