@@ -98,6 +98,29 @@ Initial expectation:
 5. Add Secure Boot provisioning and PKI workflows.
 6. Add fleet status dashboard and attestation evidence reporting.
 
+## Security Search Experiments
+
+The repository includes an AI-driven security configuration search loop for profile hardening experiments.
+
+Run the experiment runner from `src/`:
+
+```bash
+go run . security-search run \
+	--goal "Internet-facing web server with SSH and HTTPS only" \
+	--output-dir ../artifacts/security-search
+```
+
+Useful flags:
+
+- `--model` overrides the OpenRouter model for one run.
+- `--temperature`, `--target-count`, `--batch-size`, and `--rounds` control the search budget.
+- `--allow-partial=false` fails the run instead of keeping partial results after a later batch error.
+- `--save-raw-responses` stores the raw model JSON text for each round in the output artifact.
+
+The runner uses a fixed minimal base profile with empty/default settings so experiments can run without a database or saved Fleeti profile.
+
+Each run writes one JSON artifact containing the goal, extracted scenario, per-round search trace, ranked candidates, and evaluator results.
+
 ## Project Status
 
 This repository currently contains the initial project concept and architecture notes. Implementation details and concrete interfaces will be added incrementally.

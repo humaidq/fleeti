@@ -22,7 +22,7 @@
       {
         "10-nix-store" = {
           Source = commonSource // {
-            MatchPattern = [ "${config.system.image.id}_@v.nix-store.raw" ];
+            MatchPattern = [ "${config.system.image.id}_@v.nix-store.raw.xz" ];
           };
 
           Target = {
@@ -30,6 +30,7 @@
 
             Path = "auto";
             MatchPattern = "nix-store_@v";
+            MatchPartitionType = "linux-generic";
             Type = "partition";
             ReadOnly = "yes";
           };
@@ -39,7 +40,7 @@
 
         "20-boot-image" = {
           Source = commonSource // {
-            MatchPattern = [ "${config.boot.uki.name}_@v.efi" ];
+            MatchPattern = [ "${config.boot.uki.name}_@v.efi.xz" ];
           };
           Target = {
             InstancesMax = 2;

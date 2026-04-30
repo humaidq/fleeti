@@ -27,19 +27,28 @@ import (
 )
 
 const (
-	nixosSourceDirName      = "nixos"
-	updatesDirName          = "updates"
-	updatesArtifactsDirName = "artifacts"
-	installerArtifactsDir   = "installer"
-	buildOverridesPath      = "modules/build-overrides.nix"
-	kernelPatchesDirPath    = "modules/kernel-patches"
-	profileRawNixModulePath = "modules/profile-raw-nix.nix"
-	buildLogFlushSize       = 4096
-	updateBuildTarget       = ".#fleeti-update"
-	installerBuildTarget    = ".#fleeti-installer"
+	nixosSourceDirName           = "nixos"
+	updatesDirName               = "updates"
+	updatesArtifactsDirName      = "artifacts"
+	installerArtifactsDir        = "installer"
+	buildOverridesPath           = "modules/build-overrides.nix"
+	kernelPatchesDirPath         = "modules/kernel-patches"
+	profileRawNixModulePath      = "modules/profile-raw-nix.nix"
+	buildLogFlushSize            = 4096
+	updateBuildTarget            = ".#fleeti-update"
+	installerBuildTarget         = ".#fleeti-installer"
+	defaultFleetiInstanceBaseURL = "https://admin.fleeti.ae"
+	fleetiInstanceBaseURLEnvVar  = "FLEETI_INSTANCE_BASE_URL"
 )
 
 var safeUpdatePathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+
+var (
+	listQueuedBuildExecutions          = db.ListQueuedBuildExecutions
+	listQueuedBuildInstallerExecutions = db.ListQueuedBuildInstallerExecutions
+	requeueBuildExecution              = queueBuildExecution
+	requeueInstallerBuildExecution     = queueInstallerBuildExecution
+)
 
 func queueBuildExecution(buildID, buildVersion string) {
 	go executeBuild(buildID, buildVersion)
@@ -47,6 +56,32 @@ func queueBuildExecution(buildID, buildVersion string) {
 
 func queueInstallerBuildExecution(buildID string) {
 	go executeInstallerBuild(buildID)
+}
+
+func RecoverQueuedBuildExecutions(ctx context.Context) error {
+	queuedBuilds, err := listQueuedBuildExecutions(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list queued builds for recovery: %w", err)
+	}
+
+	for _, build := range queuedBuilds {
+		requeueBuildExecution(build.ID, build.Version)
+	}
+
+	queuedInstallerBuilds, err := listQueuedBuildInstallerExecutions(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list queued installer builds for recovery: %w", err)
+	}
+
+	for _, build := range queuedInstallerBuilds {
+		requeueInstallerBuildExecution(build.ID)
+	}
+
+	if len(queuedBuilds) > 0 || len(queuedInstallerBuilds) > 0 {
+		logger.Warn("requeued queued builds after restart", "builds", len(queuedBuilds), "installer_builds", len(queuedInstallerBuilds))
+	}
+
+	return nil
 }
 
 func executeBuild(buildID, buildVersion string) {
@@ -560,6 +595,11 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 		return fmt.Errorf("failed to build package expressions: %w", err)
 	}
 
+	instanceBaseURL, err := fleetiInstanceBaseURL()
+	if err != nil {
+		return err
+	}
+
 	kernelOverridesBlock, err := buildKernelOverridesBlock(workspaceNixOSDir, kernelConfig)
 	if err != nil {
 		return fmt.Errorf("failed to build kernel overrides: %w", err)
@@ -573,7 +613,7 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	}
 
 	updateBasePath := "/update/" + fleetID + "/"
-	updateSourcePath := "https://admin.fleeti.ae" + updateBasePath
+	updateSourcePath := instanceBaseURL + updateBasePath
 
 	packageLines := ""
 	if len(packageExpressions) > 0 {
@@ -617,6 +657,36 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	}
 
 	return nil
+}
+
+func fleetiInstanceBaseURL() (string, error) {
+	baseURL := strings.TrimSpace(os.Getenv(fleetiInstanceBaseURLEnvVar))
+	if baseURL == "" {
+		baseURL = defaultFleetiInstanceBaseURL
+	}
+
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: %w", fleetiInstanceBaseURLEnvVar, err)
+	}
+
+	if parsed.Scheme == "" {
+		return "", fmt.Errorf("invalid %s: scheme is required", fleetiInstanceBaseURLEnvVar)
+	}
+
+	if parsed.Host == "" {
+		return "", fmt.Errorf("invalid %s: host is required", fleetiInstanceBaseURLEnvVar)
+	}
+
+	if parsed.RawQuery != "" {
+		return "", fmt.Errorf("invalid %s: query parameters are not supported", fleetiInstanceBaseURLEnvVar)
+	}
+
+	if parsed.Fragment != "" {
+		return "", fmt.Errorf("invalid %s: fragments are not supported", fleetiInstanceBaseURLEnvVar)
+	}
+
+	return strings.TrimRight(parsed.String(), "/"), nil
 }
 
 func writeProfileRawNixModule(workspaceNixOSDir, rawNix string) error {
@@ -900,13 +970,7 @@ func publishBuildArtifacts(resultDir, updatesDir, buildID string) (string, error
 	for _, entry := range entries {
 		name := entry.Name()
 
-		if name == checksumManifestFileName {
-			logger.Warn("ignoring pre-generated checksum manifest", "file", name)
-
-			continue
-		}
-
-		if !isUpdateArtifactFileName(name) {
+		if !isPublishedUpdateArtifactFileName(name) {
 			logger.Warn("ignoring non-matching build artifact", "file", name)
 
 			continue
@@ -997,7 +1061,19 @@ func choosePrimaryArtifactURL(buildID string, artifactNames []string) string {
 	prefix := "/update/" + url.PathEscape(updatesArtifactsDirName) + "/" + url.PathEscape(buildID) + "/"
 
 	for _, name := range artifactNames {
+		if strings.HasSuffix(name, ".nix-store.raw.xz") {
+			return prefix + url.PathEscape(name)
+		}
+	}
+
+	for _, name := range artifactNames {
 		if strings.HasSuffix(name, ".nix-store.raw") {
+			return prefix + url.PathEscape(name)
+		}
+	}
+
+	for _, name := range artifactNames {
+		if strings.HasSuffix(name, ".efi.xz") {
 			return prefix + url.PathEscape(name)
 		}
 	}
@@ -1230,11 +1306,7 @@ func collectPublishedArtifacts(directoryPath string) ([]publishedArtifact, error
 	for _, entry := range entries {
 		name := entry.Name()
 
-		if name == checksumManifestFileName {
-			continue
-		}
-
-		if !isUpdateArtifactFileName(name) {
+		if !isPublishedUpdateArtifactFileName(name) {
 			continue
 		}
 

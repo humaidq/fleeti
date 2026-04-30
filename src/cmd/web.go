@@ -99,6 +99,10 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		appLogger.Warn("recovered interrupted installer builds", "count", recoveredInstallerBuilds)
 	}
 
+	if err := routes.RecoverQueuedBuildExecutions(ctx); err != nil {
+		return fmt.Errorf("failed to recover queued builds: %w", err)
+	}
+
 	if err := routes.InitializeKernelOptionsCache(ctx); err != nil {
 		appLogger.Warn("failed to initialize kernel options cache", "error", err)
 	}

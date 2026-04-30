@@ -26,12 +26,13 @@ import (
 )
 
 const (
-	profileSecuritySearchGoalMaxBytes     = 4 * 1024
-	profileSecuritySearchTargetCount      = 24
-	profileSecuritySearchBatchSize        = 8
-	profileSecuritySearchMaxRounds        = 3
-	profileSecuritySearchPromptTopCount   = 3
-	profileSecuritySearchPromptWorstCount = 2
+	profileSecuritySearchGoalMaxBytes       = 4 * 1024
+	profileSecuritySearchTargetCount        = 24
+	profileSecuritySearchBatchSize          = 8
+	profileSecuritySearchMaxRounds          = 3
+	defaultProfileSecuritySearchTemperature = 0.4
+	profileSecuritySearchPromptTopCount     = 3
+	profileSecuritySearchPromptWorstCount   = 2
 
 	profileSecuritySearchJobStatusQueued    = "queued"
 	profileSecuritySearchJobStatusRunning   = "running"
@@ -84,11 +85,18 @@ type profileSecuritySearchProgress struct {
 	Status                  string
 	ProgressMessage         string
 	CurrentRound            int
+	TotalRounds             int
+	TargetCandidateCount    int
 	EvaluatedCandidateCount int
 	UniqueCandidateCount    int
 	DuplicateCandidateCount int
 	Candidates              []profileSecuritySearchCandidateView
 	Scenario                profileSecuritySearchScenarioView
+}
+
+type profileSecuritySearchBatchGeneration struct {
+	Candidates       []profileSecuritySearchLLMCandidate
+	RawModelResponse string
 }
 
 type profileSecuritySearchJobRecord struct {
@@ -346,13 +354,6 @@ func ProfileSecuritySearch(c flamego.Context, s session.Session, ai *ProfileWiza
 		return
 	}
 
-	currentSecurity, err := profileSecurityConfigFromProfileConfig(profile.ConfigJSON)
-	if err != nil {
-		writeJSONError(c, http.StatusBadRequest, "Failed to parse current security settings")
-
-		return
-	}
-
 	scenario := profileSecuritySearchScenarioViewFromModel(profileSecuritySearchScenarioFromGoal(goal))
 	jobState, err := profileSecuritySearchJobs.Create(profileID, user.ID.String(), goal, scenario)
 	if err != nil {
@@ -363,7 +364,7 @@ func ProfileSecuritySearch(c flamego.Context, s session.Session, ai *ProfileWiza
 	}
 
 	jobID := jobState.JobID
-	go runProfileSecuritySearchJob(jobID, ai, profile, currentSecurity, goal)
+	go runProfileSecuritySearchJob(jobID, ai, profile, goal)
 
 	writeJSON(c, profileSecuritySearchStartResponse{
 		JobID:           jobID,
@@ -413,20 +414,21 @@ func ProfileSecuritySearchStatus(c flamego.Context, s session.Session) {
 	writeJSON(c, record.State)
 }
 
-func runProfileSecuritySearchJob(jobID string, ai *ProfileWizardAI, profile db.ProfileEdit, currentSecurity ProfileSecurityConfig, goal string) {
+func runProfileSecuritySearchJob(jobID string, ai *ProfileWizardAI, profile db.ProfileEdit, goal string) {
 	profileSecuritySearchJobs.Update(jobID, func(state *profileSecuritySearchJobStatusResponse) {
 		state.Status = profileSecuritySearchJobStatusRunning
 		state.ProgressMessage = "Starting security search"
 	})
 
-	response, err := ai.SearchProfileSecurityCandidates(context.Background(), profile, currentSecurity, goal, func(progress profileSecuritySearchProgress) {
+	options := DefaultProfileSecuritySearchRunOptions(goal)
+	response, err := ai.RunProfileSecuritySearch(context.Background(), profileSecuritySearchBaseProfileFromDB(profile), options, func(progress profileSecuritySearchProgress) {
 		profileSecuritySearchJobs.Update(jobID, func(state *profileSecuritySearchJobStatusResponse) {
 			state.Status = progress.Status
 			state.Done = progress.Status == profileSecuritySearchJobStatusSucceeded || progress.Status == profileSecuritySearchJobStatusFailed
 			state.ProgressMessage = progress.ProgressMessage
 			state.CurrentRound = progress.CurrentRound
-			state.TotalRounds = profileSecuritySearchMaxRounds
-			state.TargetCandidateCount = profileSecuritySearchTargetCount
+			state.TotalRounds = progress.TotalRounds
+			state.TargetCandidateCount = progress.TargetCandidateCount
 			state.Scenario = progress.Scenario
 			state.EvaluatedCandidateCount = progress.EvaluatedCandidateCount
 			state.UniqueCandidateCount = progress.UniqueCandidateCount
@@ -450,9 +452,9 @@ func runProfileSecuritySearchJob(jobID string, ai *ProfileWizardAI, profile db.P
 		state.Status = profileSecuritySearchJobStatusSucceeded
 		state.Done = true
 		state.ProgressMessage = fmt.Sprintf("Evaluated %d unique candidates", response.UniqueCandidateCount)
-		state.CurrentRound = profileSecuritySearchMaxRounds
-		state.TotalRounds = profileSecuritySearchMaxRounds
-		state.TargetCandidateCount = profileSecuritySearchTargetCount
+		state.CurrentRound = len(response.Rounds)
+		state.TotalRounds = response.MaxRounds
+		state.TargetCandidateCount = response.TargetCandidateCount
 		state.Scenario = response.Scenario
 		state.EvaluatedCandidateCount = response.EvaluatedCandidateCount
 		state.UniqueCandidateCount = response.UniqueCandidateCount
@@ -491,22 +493,33 @@ func writeProfileSecuritySearchError(c flamego.Context, err error) {
 	}
 }
 
-func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, profile db.ProfileEdit, currentSecurity ProfileSecurityConfig, goal string, onProgress func(profileSecuritySearchProgress)) (profileSecuritySearchResponse, error) {
-	goal = strings.TrimSpace(goal)
-	if ai == nil || !ai.Enabled() {
-		return profileSecuritySearchResponse{}, fmt.Errorf("profile security search ai is disabled")
-	}
+func profileSecuritySearchBaseProfileFromDB(profile db.ProfileEdit) ProfileSecuritySearchBaseProfile {
+	return normalizeProfileSecuritySearchBaseProfile(ProfileSecuritySearchBaseProfile{
+		ID:                  strings.TrimSpace(profile.ID),
+		Name:                strings.TrimSpace(profile.Name),
+		Description:         strings.TrimSpace(profile.Description),
+		Revision:            profile.LatestRevision,
+		FleetIDs:            append([]string(nil), profile.FleetIDs...),
+		ConfigSchemaVersion: profile.ConfigSchemaVersion,
+		ConfigJSON:          strings.TrimSpace(profile.ConfigJSON),
+		RawNix:              strings.TrimSpace(profile.RawNix),
+	})
+}
 
-	scenario := profileSecuritySearchScenarioFromGoal(goal)
+func (ai *ProfileWizardAI) searchProfileSecurityCandidates(ctx context.Context, profile ProfileSecuritySearchBaseProfile, currentSecurity ProfileSecurityConfig, options ProfileSecuritySearchRunOptions, onProgress func(profileSecuritySearchProgress)) (ProfileSecuritySearchRunResult, error) {
+	scenario := profileSecuritySearchScenarioFromGoal(options.Goal)
 	scenarioView := profileSecuritySearchScenarioViewFromModel(scenario)
-	evaluated := make([]profileSecuritySearchCandidateView, 0, profileSecuritySearchTargetCount)
-	seen := make(map[string]struct{}, profileSecuritySearchTargetCount)
+	evaluated := make([]profileSecuritySearchCandidateView, 0, options.TargetCandidateCount)
+	rounds := make([]ProfileSecuritySearchRoundResult, 0, options.MaxRounds)
+	seen := make(map[string]struct{}, options.TargetCandidateCount)
 	duplicateCount := 0
 	if onProgress != nil {
 		onProgress(profileSecuritySearchProgress{
 			Status:                  profileSecuritySearchJobStatusRunning,
 			ProgressMessage:         "Preparing security search",
 			CurrentRound:            0,
+			TotalRounds:             options.MaxRounds,
+			TargetCandidateCount:    options.TargetCandidateCount,
 			EvaluatedCandidateCount: 0,
 			UniqueCandidateCount:    0,
 			DuplicateCandidateCount: 0,
@@ -515,12 +528,14 @@ func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, 
 		})
 	}
 
-	for round := 0; round < profileSecuritySearchMaxRounds && len(evaluated) < profileSecuritySearchTargetCount; round++ {
+	for round := 0; round < options.MaxRounds && len(evaluated) < options.TargetCandidateCount; round++ {
 		if onProgress != nil {
 			onProgress(profileSecuritySearchProgress{
 				Status:                  profileSecuritySearchJobStatusRunning,
-				ProgressMessage:         fmt.Sprintf("Generating candidate batch %d of %d", round+1, profileSecuritySearchMaxRounds),
+				ProgressMessage:         fmt.Sprintf("Generating candidate batch %d of %d", round+1, options.MaxRounds),
 				CurrentRound:            round + 1,
+				TotalRounds:             options.MaxRounds,
+				TargetCandidateCount:    options.TargetCandidateCount,
 				EvaluatedCandidateCount: len(evaluated),
 				UniqueCandidateCount:    len(evaluated),
 				DuplicateCandidateCount: duplicateCount,
@@ -529,27 +544,31 @@ func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, 
 			})
 		}
 
-		requestedCount := profileSecuritySearchBatchSize
-		remaining := profileSecuritySearchTargetCount - len(evaluated)
+		requestedCount := options.BatchSize
+		remaining := options.TargetCandidateCount - len(evaluated)
 		if remaining < requestedCount {
 			requestedCount = remaining
 		}
 
-		batch, err := ai.generateProfileSecurityCandidateBatch(ctx, profile, currentSecurity, goal, scenario, evaluated, round+1, requestedCount)
+		batch, err := ai.generateProfileSecurityCandidateBatch(ctx, profile, currentSecurity, options, scenario, evaluated, round+1, requestedCount)
 		if err != nil {
-			if len(evaluated) > 0 {
+			if len(evaluated) > 0 && options.AllowPartial {
 				logger.Warn("profile security search batch failed after partial progress", "profile_id", profile.ID, "round", round+1, "error", err)
 				break
 			}
 
-			return profileSecuritySearchResponse{}, err
+			result := buildProfileSecuritySearchRunResult(options, scenarioView, duplicateCount, rounds, evaluated)
+			return result, err
 		}
 
-		for _, candidate := range batch {
+		acceptedCount := 0
+		duplicateCountBeforeRound := duplicateCount
+		for _, candidate := range batch.Candidates {
 			config := candidate.Config.toModel()
 			hash, err := profileSecuritySearchConfigHash(config)
 			if err != nil {
-				return profileSecuritySearchResponse{}, err
+				result := buildProfileSecuritySearchRunResult(options, scenarioView, duplicateCount, rounds, evaluated)
+				return result, err
 			}
 
 			if _, ok := seen[hash]; ok {
@@ -559,6 +578,8 @@ func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, 
 						Status:                  profileSecuritySearchJobStatusRunning,
 						ProgressMessage:         fmt.Sprintf("Skipped duplicate candidate in batch %d", round+1),
 						CurrentRound:            round + 1,
+						TotalRounds:             options.MaxRounds,
+						TargetCandidateCount:    options.TargetCandidateCount,
 						EvaluatedCandidateCount: len(evaluated),
 						UniqueCandidateCount:    len(evaluated),
 						DuplicateCandidateCount: duplicateCount,
@@ -571,11 +592,14 @@ func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, 
 
 			seen[hash] = struct{}{}
 			evaluated = append(evaluated, evaluateProfileSecuritySearchCandidate(ctx, profile, config, scenario, strings.TrimSpace(candidate.Rationale), hash))
+			acceptedCount++
 			if onProgress != nil {
 				onProgress(profileSecuritySearchProgress{
 					Status:                  profileSecuritySearchJobStatusRunning,
-					ProgressMessage:         fmt.Sprintf("Evaluated %d of %d unique candidates", len(evaluated), profileSecuritySearchTargetCount),
+					ProgressMessage:         fmt.Sprintf("Evaluated %d of %d unique candidates", len(evaluated), options.TargetCandidateCount),
 					CurrentRound:            round + 1,
+					TotalRounds:             options.MaxRounds,
+					TargetCandidateCount:    options.TargetCandidateCount,
 					EvaluatedCandidateCount: len(evaluated),
 					UniqueCandidateCount:    len(evaluated),
 					DuplicateCandidateCount: duplicateCount,
@@ -583,54 +607,88 @@ func (ai *ProfileWizardAI) SearchProfileSecurityCandidates(ctx context.Context, 
 					Scenario:                scenarioView,
 				})
 			}
-			if len(evaluated) >= profileSecuritySearchTargetCount {
+			if len(evaluated) >= options.TargetCandidateCount {
 				break
 			}
 		}
+
+		_, _, bestScore, averageScore := summarizeProfileSecuritySearchCandidates(evaluated)
+		roundResult := ProfileSecuritySearchRoundResult{
+			Round:                   round + 1,
+			RequestedCandidateCount: requestedCount,
+			GeneratedCandidateCount: len(batch.Candidates),
+			AcceptedCandidateCount:  acceptedCount,
+			DuplicateCandidateCount: duplicateCount - duplicateCountBeforeRound,
+			EvaluatedCandidateCount: len(evaluated),
+			BestScoreAfterRound:     bestScore,
+			AverageScoreAfterRound:  averageScore,
+			TopCandidateIDs:         topProfileSecuritySearchCandidateIDs(evaluated, profileSecuritySearchPromptTopCount),
+		}
+		if options.SaveRawResponses {
+			roundResult.RawModelResponse = batch.RawModelResponse
+		}
+		rounds = append(rounds, roundResult)
 	}
 
 	if len(evaluated) == 0 {
-		return profileSecuritySearchResponse{}, fmt.Errorf("profile security search produced no candidates")
+		return buildProfileSecuritySearchRunResult(options, scenarioView, duplicateCount, rounds, evaluated), fmt.Errorf("profile security search produced no candidates")
 	}
 
-	evaluated = rankedProfileSecuritySearchCandidates(evaluated)
+	return buildProfileSecuritySearchRunResult(options, scenarioView, duplicateCount, rounds, evaluated), nil
+}
 
-	return profileSecuritySearchResponse{
-		Goal:                    goal,
+func buildProfileSecuritySearchRunResult(options ProfileSecuritySearchRunOptions, scenarioView profileSecuritySearchScenarioView, duplicateCount int, evaluatedRounds []ProfileSecuritySearchRoundResult, evaluated []profileSecuritySearchCandidateView) ProfileSecuritySearchRunResult {
+	evaluated = rankedProfileSecuritySearchCandidates(evaluated)
+	validCount, nixValidCount, bestScore, averageScore := summarizeProfileSecuritySearchCandidates(evaluated)
+
+	return ProfileSecuritySearchRunResult{
+		Goal:                    options.Goal,
 		Scenario:                scenarioView,
+		Model:                   options.Model,
+		Temperature:             options.Temperature,
+		TargetCandidateCount:    options.TargetCandidateCount,
+		BatchSize:               options.BatchSize,
+		MaxRounds:               options.MaxRounds,
+		AllowPartial:            options.AllowPartial,
+		SaveRawResponses:        options.SaveRawResponses,
 		EvaluatedCandidateCount: len(evaluated),
 		UniqueCandidateCount:    len(evaluated),
 		DuplicateCandidateCount: duplicateCount,
+		ValidCandidateCount:     validCount,
+		NixValidCandidateCount:  nixValidCount,
+		BestScore:               bestScore,
+		AverageScore:            averageScore,
+		Rounds:                  append([]ProfileSecuritySearchRoundResult(nil), evaluatedRounds...),
 		Candidates:              evaluated,
-	}, nil
+	}
 }
 
-func (ai *ProfileWizardAI) generateProfileSecurityCandidateBatch(ctx context.Context, profile db.ProfileEdit, currentSecurity ProfileSecurityConfig, goal string, scenario profileSecuritySearchScenario, evaluated []profileSecuritySearchCandidateView, round, requestedCount int) ([]profileSecuritySearchLLMCandidate, error) {
+func (ai *ProfileWizardAI) generateProfileSecurityCandidateBatch(ctx context.Context, profile ProfileSecuritySearchBaseProfile, currentSecurity ProfileSecurityConfig, options ProfileSecuritySearchRunOptions, scenario profileSecuritySearchScenario, evaluated []profileSecuritySearchCandidateView, round, requestedCount int) (profileSecuritySearchBatchGeneration, error) {
 	messages := []openRouterChatMessage{
 		{Role: "system", Content: buildProfileSecuritySearchSystemPrompt()},
-		{Role: "user", Content: buildProfileSecuritySearchBatchPrompt(profile, currentSecurity, goal, scenario, evaluated, round, requestedCount)},
+		{Role: "user", Content: buildProfileSecuritySearchBatchPrompt(profile, currentSecurity, options.Goal, scenario, evaluated, round, options.MaxRounds, requestedCount)},
 	}
 
 	response, err := ai.createChatCompletion(ctx, openRouterChatRequest{
-		Model:       ai.model,
+		Model:       options.Model,
 		Messages:    messages,
-		Temperature: 0.4,
+		Temperature: options.Temperature,
 	})
 	if err != nil {
-		return nil, err
+		return profileSecuritySearchBatchGeneration{}, err
 	}
 
 	if len(response.Choices) == 0 {
-		return nil, fmt.Errorf("openrouter returned no choices")
+		return profileSecuritySearchBatchGeneration{}, fmt.Errorf("openrouter returned no choices")
 	}
 
 	messageText := extractOpenRouterMessageText(response.Choices[0].Message.Content)
 	decoded, err := decodeProfileSecuritySearchModelResponse(messageText)
 	if err != nil {
-		return nil, err
+		return profileSecuritySearchBatchGeneration{}, err
 	}
 
-	return decoded.Candidates, nil
+	return profileSecuritySearchBatchGeneration{Candidates: decoded.Candidates, RawModelResponse: strings.TrimSpace(messageText)}, nil
 }
 
 func buildProfileSecuritySearchSystemPrompt() string {
@@ -643,7 +701,7 @@ func buildProfileSecuritySearchSystemPrompt() string {
 		"Supported website blocking categories are fakenews, gambling, porn, and social.")
 }
 
-func buildProfileSecuritySearchBatchPrompt(profile db.ProfileEdit, currentSecurity ProfileSecurityConfig, goal string, scenario profileSecuritySearchScenario, evaluated []profileSecuritySearchCandidateView, round, requestedCount int) string {
+func buildProfileSecuritySearchBatchPrompt(profile ProfileSecuritySearchBaseProfile, currentSecurity ProfileSecurityConfig, goal string, scenario profileSecuritySearchScenario, evaluated []profileSecuritySearchCandidateView, round, totalRounds, requestedCount int) string {
 	currentConfigJSON, _ := json.Marshal(profileSecurityAPIConfigFromModel(currentSecurity))
 	scenarioJSON, _ := json.Marshal(profileSecuritySearchScenarioViewFromModel(scenario))
 	priorJSON, _ := json.Marshal(profileSecuritySearchPromptCandidates(evaluated))
@@ -710,7 +768,7 @@ Current security JSON: %s
 Base profile config JSON (security is evaluated on top of this): %s
 Evaluator scenario JSON: %s
 Previously evaluated candidate summary JSON: %s
-`, round, profileSecuritySearchMaxRounds, requestedCount, requestedCount,
+`, round, totalRounds, requestedCount, requestedCount,
 		escapePromptJSONString(profile.Name),
 		escapePromptJSONString(profile.Description),
 		escapePromptJSONString(goal),
@@ -769,7 +827,7 @@ func extractProfileSecuritySearchJSON(raw string) string {
 	return raw
 }
 
-func evaluateProfileSecuritySearchCandidate(ctx context.Context, profile db.ProfileEdit, config ProfileSecurityConfig, scenario profileSecuritySearchScenario, rationale, hash string) profileSecuritySearchCandidateView {
+func evaluateProfileSecuritySearchCandidate(ctx context.Context, profile ProfileSecuritySearchBaseProfile, config ProfileSecurityConfig, scenario profileSecuritySearchScenario, rationale, hash string) profileSecuritySearchCandidateView {
 	config = normalizeProfileSecurityConfig(config)
 	config.Configured = true
 

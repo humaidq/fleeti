@@ -3670,10 +3670,10 @@ func profileKernelSummary(kernelConfig ProfileKernelConfig) string {
 
 func profileOpenclawMicroVMSummary(enabled bool) string {
 	if enabled {
-		return "Enabled"
+		return "MicroVM enabled"
 	}
 
-	return "Disabled"
+	return "MicroVM disabled"
 }
 
 func selectedFleetIDsFromForm(values url.Values) []string {

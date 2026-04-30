@@ -116,6 +116,15 @@ type Build struct {
 	CreatedAt         string
 }
 
+type QueuedBuildExecution struct {
+	ID      string
+	Version string
+}
+
+type QueuedBuildInstallerExecution struct {
+	ID string
+}
+
 type BuildLogChunk struct {
 	ID      int64
 	Content string
@@ -1384,6 +1393,81 @@ func GetBuildByID(ctx context.Context, buildID string) (Build, error) {
 	}
 
 	return item, nil
+}
+
+func ListQueuedBuildExecutions(ctx context.Context) ([]QueuedBuildExecution, error) {
+	p := GetPool()
+	if p == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT
+			id::text,
+			version
+		FROM builds
+		WHERE status = $1
+		ORDER BY created_at ASC, id ASC
+	`, BuildStatusQueued)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list queued build executions: %w", err)
+	}
+
+	defer rows.Close()
+
+	builds := make([]QueuedBuildExecution, 0)
+	for rows.Next() {
+		var item QueuedBuildExecution
+
+		if err := rows.Scan(&item.ID, &item.Version); err != nil {
+			return nil, fmt.Errorf("failed to scan queued build execution: %w", err)
+		}
+
+		builds = append(builds, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed during queued build execution rows iteration: %w", err)
+	}
+
+	return builds, nil
+}
+
+func ListQueuedBuildInstallerExecutions(ctx context.Context) ([]QueuedBuildInstallerExecution, error) {
+	p := GetPool()
+	if p == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	rows, err := p.Query(ctx, `
+		SELECT
+			id::text
+		FROM builds
+		WHERE installer_status = $1
+		ORDER BY created_at ASC, id ASC
+	`, BuildInstallerStatusQueued)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list queued build installer executions: %w", err)
+	}
+
+	defer rows.Close()
+
+	builds := make([]QueuedBuildInstallerExecution, 0)
+	for rows.Next() {
+		var item QueuedBuildInstallerExecution
+
+		if err := rows.Scan(&item.ID); err != nil {
+			return nil, fmt.Errorf("failed to scan queued build installer execution: %w", err)
+		}
+
+		builds = append(builds, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed during queued build installer execution rows iteration: %w", err)
+	}
+
+	return builds, nil
 }
 
 func DeleteBuild(ctx context.Context, buildID string) error {

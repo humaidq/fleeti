@@ -30,8 +30,8 @@ const (
 )
 
 var (
-	nixStoreRawArtifactPattern = regexp.MustCompile(`^[^/]+_[^/]+\.nix-store\.raw$`)
-	ukiArtifactPattern         = regexp.MustCompile(`^[^/]+_[^/]+\.efi$`)
+	nixStoreRawArtifactPattern = regexp.MustCompile(`^[^/]+_[^/]+\.nix-store\.raw(\.xz)?$`)
+	ukiArtifactPattern         = regexp.MustCompile(`^[^/]+_[^/]+\.efi(\.xz)?$`)
 	fleetIDPathPattern         = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
@@ -63,6 +63,18 @@ func DynamicSHA256SUMS(updatesDir string) flamego.Handler {
 			header := c.ResponseWriter().Header()
 			header.Set("Allow", "GET, HEAD")
 			c.ResponseWriter().WriteHeader(http.StatusMethodNotAllowed)
+
+			return
+		}
+
+		checksumManifestPath := filepath.Join(updatesDir, fleetID, checksumManifestFileName)
+		if _, err := os.Stat(checksumManifestPath); err == nil {
+			c.Next()
+
+			return
+		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			logger.Error("failed to stat fleet checksum manifest", "directory", updatesDir, "fleet_id", fleetID, "path", checksumManifestPath, "error", err)
+			c.ResponseWriter().WriteHeader(http.StatusInternalServerError)
 
 			return
 		}
@@ -133,6 +145,14 @@ func isUpdateArtifactFileName(name string) bool {
 	}
 
 	return nixStoreRawArtifactPattern.MatchString(name) || ukiArtifactPattern.MatchString(name)
+}
+
+func isPublishedUpdateArtifactFileName(name string) bool {
+	if name == checksumManifestFileName {
+		return true
+	}
+
+	return isUpdateArtifactFileName(name)
 }
 
 func renderUpdateChecksumsForDirectory(updatesDir string) ([]byte, error) {

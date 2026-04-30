@@ -142,3 +142,55 @@ func TestScoreProfileSecuritySearchCandidatePenalizesMissingRequiredPorts(t *tes
 		t.Fatalf("expected missing required port penalty, got score %d", score)
 	}
 }
+
+func TestNormalizeProfileSecuritySearchRunOptionsAppliesDefaults(t *testing.T) {
+	t.Parallel()
+
+	options, err := normalizeProfileSecuritySearchRunOptions(ProfileSecuritySearchRunOptions{Goal: "  web server  "})
+	if err != nil {
+		t.Fatalf("normalizeProfileSecuritySearchRunOptions returned error: %v", err)
+	}
+
+	if options.Goal != "web server" {
+		t.Fatalf("expected trimmed goal, got %q", options.Goal)
+	}
+
+	if options.Temperature != defaultProfileSecuritySearchTemperature {
+		t.Fatalf("unexpected temperature default: %v", options.Temperature)
+	}
+
+	if options.TargetCandidateCount != profileSecuritySearchTargetCount || options.BatchSize != profileSecuritySearchBatchSize || options.MaxRounds != profileSecuritySearchMaxRounds {
+		t.Fatalf("unexpected search defaults: %#v", options)
+	}
+}
+
+func TestNormalizeProfileSecuritySearchRunOptionsRejectsInvalidTemperature(t *testing.T) {
+	t.Parallel()
+
+	_, err := normalizeProfileSecuritySearchRunOptions(ProfileSecuritySearchRunOptions{Goal: "web", Temperature: 2.5})
+	if err == nil {
+		t.Fatal("expected invalid temperature error, got nil")
+	}
+}
+
+func TestNormalizeProfileSecuritySearchBaseProfileAppliesDefaults(t *testing.T) {
+	t.Parallel()
+
+	profile := normalizeProfileSecuritySearchBaseProfile(ProfileSecuritySearchBaseProfile{})
+
+	if profile.Name == "" || profile.Description == "" {
+		t.Fatalf("expected default profile metadata, got %#v", profile)
+	}
+
+	if profile.ConfigJSON != defaultProfileWizardConfigJSON {
+		t.Fatalf("unexpected default config json: %q", profile.ConfigJSON)
+	}
+
+	if profile.ConfigSchemaVersion != 1 || profile.Revision != 1 {
+		t.Fatalf("unexpected default version fields: %#v", profile)
+	}
+
+	if len(profile.FleetIDs) != 1 || profile.FleetIDs[0] != profileNixValidationFleetID {
+		t.Fatalf("unexpected default fleet ids: %#v", profile.FleetIDs)
+	}
+}

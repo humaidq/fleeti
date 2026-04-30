@@ -33,3 +33,5 @@ result
 *.log
 updates/
 report/
+artifacts/
+*.pyc

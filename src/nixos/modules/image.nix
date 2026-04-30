@@ -13,12 +13,15 @@
     (modulesPath + "/image/repart.nix")
   ];
 
+  boot.plymouth.enable = lib.mkForce true;
+  boot.plymouth.logo = ./boot.png;
+
   system.image.id = lib.mkDefault "fleeti";
 
   image.repart =
     let
       inherit (pkgs.stdenv.hostPlatform) efiArch;
-      size = "2G";
+      size = "10G";
     in
     {
       name = config.system.image.id;
@@ -55,7 +58,7 @@
             Minimize = "off";
             SizeMinBytes = size;
             SizeMaxBytes = size;
-            Format = "squashfs";
+            Format = "erofs";
             ReadOnly = "yes";
             SplitName = "nix-store";
           };

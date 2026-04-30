@@ -5,14 +5,126 @@
 package routes
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/humaidq/fleeti/v2/db"
 )
+
+func TestRecoverQueuedBuildExecutionsRequeuesQueuedWork(t *testing.T) {
+	originalListQueuedBuildExecutions := listQueuedBuildExecutions
+	originalListQueuedBuildInstallerExecutions := listQueuedBuildInstallerExecutions
+	originalRequeueBuildExecution := requeueBuildExecution
+	originalRequeueInstallerBuildExecution := requeueInstallerBuildExecution
+
+	t.Cleanup(func() {
+		listQueuedBuildExecutions = originalListQueuedBuildExecutions
+		listQueuedBuildInstallerExecutions = originalListQueuedBuildInstallerExecutions
+		requeueBuildExecution = originalRequeueBuildExecution
+		requeueInstallerBuildExecution = originalRequeueInstallerBuildExecution
+	})
+
+	listQueuedBuildExecutions = func(context.Context) ([]db.QueuedBuildExecution, error) {
+		return []db.QueuedBuildExecution{
+			{ID: "build-1", Version: "v1.2.3"},
+			{ID: "build-2", Version: "v2.0.0"},
+		}, nil
+	}
+
+	listQueuedBuildInstallerExecutions = func(context.Context) ([]db.QueuedBuildInstallerExecution, error) {
+		return []db.QueuedBuildInstallerExecution{{ID: "build-3"}}, nil
+	}
+
+	type queuedBuildCall struct {
+		id      string
+		version string
+	}
+
+	queuedBuildCalls := make([]queuedBuildCall, 0)
+	queuedInstallerCalls := make([]string, 0)
+
+	requeueBuildExecution = func(buildID, buildVersion string) {
+		queuedBuildCalls = append(queuedBuildCalls, queuedBuildCall{id: buildID, version: buildVersion})
+	}
+
+	requeueInstallerBuildExecution = func(buildID string) {
+		queuedInstallerCalls = append(queuedInstallerCalls, buildID)
+	}
+
+	if err := RecoverQueuedBuildExecutions(context.Background()); err != nil {
+		t.Fatalf("RecoverQueuedBuildExecutions returned error: %v", err)
+	}
+
+	if got, want := queuedBuildCalls, []queuedBuildCall{{id: "build-1", version: "v1.2.3"}, {id: "build-2", version: "v2.0.0"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected queued build calls: got %#v want %#v", got, want)
+	}
+
+	if got, want := queuedInstallerCalls, []string{"build-3"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected queued installer build calls: got %#v want %#v", got, want)
+	}
+}
+
+func TestRecoverQueuedBuildExecutionsReturnsQueuedBuildErrors(t *testing.T) {
+	originalListQueuedBuildExecutions := listQueuedBuildExecutions
+	originalListQueuedBuildInstallerExecutions := listQueuedBuildInstallerExecutions
+
+	t.Cleanup(func() {
+		listQueuedBuildExecutions = originalListQueuedBuildExecutions
+		listQueuedBuildInstallerExecutions = originalListQueuedBuildInstallerExecutions
+	})
+
+	listQueuedBuildExecutions = func(context.Context) ([]db.QueuedBuildExecution, error) {
+		return nil, os.ErrPermission
+	}
+
+	listQueuedBuildInstallerExecutions = func(context.Context) ([]db.QueuedBuildInstallerExecution, error) {
+		t.Fatal("expected installer recovery list not to be called")
+		return nil, nil
+	}
+
+	err := RecoverQueuedBuildExecutions(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to list queued builds for recovery") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRecoverQueuedBuildExecutionsReturnsQueuedInstallerErrors(t *testing.T) {
+	originalListQueuedBuildExecutions := listQueuedBuildExecutions
+	originalListQueuedBuildInstallerExecutions := listQueuedBuildInstallerExecutions
+
+	t.Cleanup(func() {
+		listQueuedBuildExecutions = originalListQueuedBuildExecutions
+		listQueuedBuildInstallerExecutions = originalListQueuedBuildInstallerExecutions
+	})
+
+	listQueuedBuildExecutions = func(context.Context) ([]db.QueuedBuildExecution, error) {
+		return nil, nil
+	}
+
+	listQueuedBuildInstallerExecutions = func(context.Context) ([]db.QueuedBuildInstallerExecution, error) {
+		return nil, os.ErrPermission
+	}
+
+	err := RecoverQueuedBuildExecutions(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "failed to list queued installer builds for recovery") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
 
 func TestCollectInstallerArtifactsRecursesIntoResultTree(t *testing.T) {
 	t.Parallel()
@@ -114,6 +226,85 @@ func TestCollectInstallerArtifactsFailsOnDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestPublishBuildArtifactsPreservesChecksumManifest(t *testing.T) {
+	t.Parallel()
+
+	resultDir := t.TempDir()
+	updatesDir := t.TempDir()
+
+	rawArtifactPath := filepath.Join(resultDir, "fleeti_v1.2.3.nix-store.raw.xz")
+	if err := os.WriteFile(rawArtifactPath, []byte("raw"), 0o444); err != nil {
+		t.Fatalf("failed to create raw artifact: %v", err)
+	}
+
+	ukiArtifactPath := filepath.Join(resultDir, "fleeti_v1.2.3.efi.xz")
+	if err := os.WriteFile(ukiArtifactPath, []byte("uki"), 0o444); err != nil {
+		t.Fatalf("failed to create uki artifact: %v", err)
+	}
+
+	checksumPath := filepath.Join(resultDir, checksumManifestFileName)
+	if err := os.WriteFile(checksumPath, []byte("checksum manifest\n"), 0o444); err != nil {
+		t.Fatalf("failed to create checksum manifest: %v", err)
+	}
+
+	artifactURL, err := publishBuildArtifacts(resultDir, updatesDir, "build-1")
+	if err != nil {
+		t.Fatalf("publishBuildArtifacts returned error: %v", err)
+	}
+
+	if artifactURL != "/update/artifacts/build-1/fleeti_v1.2.3.nix-store.raw.xz" {
+		t.Fatalf("unexpected primary artifact URL: %s", artifactURL)
+	}
+
+	publishedChecksumPath := filepath.Join(updatesDir, updatesArtifactsDirName, "build-1", checksumManifestFileName)
+	publishedChecksum, err := os.ReadFile(publishedChecksumPath)
+	if err != nil {
+		t.Fatalf("failed to read published checksum manifest: %v", err)
+	}
+
+	if string(publishedChecksum) != "checksum manifest\n" {
+		t.Fatalf("unexpected published checksum manifest contents: %q", publishedChecksum)
+	}
+}
+
+func TestActivateFleetReleaseArtifactsPreservesChecksumManifest(t *testing.T) {
+	t.Parallel()
+
+	resultDir := t.TempDir()
+	updatesDir := t.TempDir()
+	fleetID := "11111111-1111-1111-1111-111111111111"
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.nix-store.raw.xz"), []byte("raw"), 0o444); err != nil {
+		t.Fatalf("failed to create raw artifact: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.efi.xz"), []byte("uki"), 0o444); err != nil {
+		t.Fatalf("failed to create uki artifact: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(resultDir, checksumManifestFileName), []byte("checksum manifest\n"), 0o444); err != nil {
+		t.Fatalf("failed to create checksum manifest: %v", err)
+	}
+
+	if _, err := publishBuildArtifacts(resultDir, updatesDir, "build-1"); err != nil {
+		t.Fatalf("publishBuildArtifacts returned error: %v", err)
+	}
+
+	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, "build-1"); err != nil {
+		t.Fatalf("activateFleetReleaseArtifacts returned error: %v", err)
+	}
+
+	activatedChecksumPath := filepath.Join(updatesDir, fleetID, checksumManifestFileName)
+	activatedChecksum, err := os.ReadFile(activatedChecksumPath)
+	if err != nil {
+		t.Fatalf("failed to read activated checksum manifest: %v", err)
+	}
+
+	if string(activatedChecksum) != "checksum manifest\n" {
+		t.Fatalf("unexpected activated checksum manifest contents: %q", activatedChecksum)
+	}
+}
+
 func TestCopyEmbeddedNixOSWorkspaceMakesOverridesWritable(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +345,81 @@ func TestWriteBuildOverridesModuleSetsKernelPackages(t *testing.T) {
 	generated := string(content)
 	if !strings.Contains(generated, "boot.kernelPackages = lib.mkForce (pkgs.linuxPackagesFor pkgs.linuxKernel.kernels.linux_6_19);") {
 		t.Fatalf("expected kernelPackages selection in generated overrides, got: %s", generated)
+	}
+}
+
+func TestWriteBuildOverridesModuleUsesDefaultFleetiInstanceURL(t *testing.T) {
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read generated build overrides file: %v", err)
+	}
+
+	generated := string(content)
+	if !strings.Contains(generated, `systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "https://admin.fleeti.ae/update/fleet-a/";`) {
+		t.Fatalf("expected default Fleeti instance URL in generated overrides, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `systemd.sysupdate.transfers."20-boot-image".Source.Path = lib.mkForce "https://admin.fleeti.ae/update/fleet-a/";`) {
+		t.Fatalf("expected default Fleeti instance URL for boot image in generated overrides, got: %s", generated)
+	}
+}
+
+func TestWriteBuildOverridesModuleUsesConfiguredFleetiInstanceURLPrefix(t *testing.T) {
+	t.Setenv(fleetiInstanceBaseURLEnvVar, "https://192.168.1.123:8080/fleeti/")
+
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read generated build overrides file: %v", err)
+	}
+
+	generated := string(content)
+	expected := `systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "https://192.168.1.123:8080/fleeti/update/fleet-a/";`
+	if !strings.Contains(generated, expected) {
+		t.Fatalf("expected configured Fleeti instance URL with prefix in generated overrides, got: %s", generated)
+	}
+}
+
+func TestWriteBuildOverridesModuleAllowsHTTPFleetiInstanceURL(t *testing.T) {
+	t.Setenv(fleetiInstanceBaseURLEnvVar, "http://192.168.1.123:8080")
+
+	root := t.TempDir()
+	modulesDir := filepath.Join(root, "modules")
+	if err := os.MkdirAll(modulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create modules directory: %v", err)
+	}
+
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(modulesDir, "build-overrides.nix"))
+	if err != nil {
+		t.Fatalf("failed to read generated build overrides file: %v", err)
+	}
+
+	generated := string(content)
+	if !strings.Contains(generated, `systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "http://192.168.1.123:8080/update/fleet-a/";`) {
+		t.Fatalf("expected HTTP Fleeti instance URL in generated overrides, got: %s", generated)
 	}
 }
 

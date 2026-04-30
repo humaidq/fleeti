@@ -37,10 +37,10 @@
     <div class="form-group">
       <label class="checkbox-label" for="profile-openclaw-microvm-enabled">
         <input id="profile-openclaw-microvm-enabled" type="checkbox" name="openclaw_microvm_enabled" value="1"{{ if .OpenClawMicroVMEnabled }} checked{{ end }} />
-        Enable OpenClaw gateway in cloud-hypervisor MicroVM
+        Include MoltHouse and autostart the OpenClaw microVM
       </label>
-      <small class="muted-text">Default is off. When enabled, this profile turns on the OpenClaw MicroVM service for builds.</small>
-      <small class="muted-text">The OpenClaw gateway uses token auth and the MicroVM has internet access.</small>
+      <small class="muted-text">Default is off. When enabled, this profile builds systems with the MoltHouse host app and helper plus one declarative OpenClaw microVM that boots on system startup.</small>
+      <small class="muted-text">Guest networking and any machine-local OpenClaw secrets stay configurable on each machine after deployment.</small>
     </div>
     <p class="muted-text">OpenClaw changes create a new profile revision.</p>
     <div class="form-actions">

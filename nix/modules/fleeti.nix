@@ -39,19 +39,19 @@ in
 
       ensureUsers = [
         {
-          name = "fleeti";
+          name = "fleeti-service";
           ensureDBOwnership = true;
         }
       ];
     };
 
-    users.users.fleeti = {
+    users.users.fleeti-service = {
       isSystemUser = true;
-      group = "fleeti";
+      group = "fleeti-service";
       description = "Fleeti service user";
     };
 
-    users.groups.fleeti = { };
+    users.groups.fleeti-service = { };
 
     systemd.services.fleeti = {
       description = "Fleeti Service";
@@ -68,8 +68,8 @@ in
 
       serviceConfig = {
         Type = "simple";
-        User = "fleeti";
-        Group = "fleeti";
+        User = "fleeti-service";
+        Group = "fleeti-service";
         Restart = "on-failure";
         RestartSec = "5s";
 

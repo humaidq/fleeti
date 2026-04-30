@@ -25,6 +25,7 @@ func main() {
 		Commands: []*cli.Command{
 			cmd.CmdStart,
 			cmd.CmdMigrate,
+			cmd.CmdSecuritySearch,
 		},
 	}
 
