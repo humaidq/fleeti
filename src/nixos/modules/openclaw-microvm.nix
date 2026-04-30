@@ -11,6 +11,7 @@ let
   cfg = config.fleeti.services.openclawMicrovm;
   hostSystem = pkgs.stdenv.hostPlatform.system;
   networkConfigured = cfg.network.parentInterface != null && cfg.network.macAddress != null;
+  defaultOpenclawMacAddress = "02:00:00:00:00:01";
   macAddressPattern = "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$";
   molthouseStateDir = "/var/lib/fleeti/molthouse";
   molthouseRuntimeDir = "/run/fleeti/molthouse";
@@ -23,6 +24,9 @@ let
   molthouseManagerPackage = pkgs.callPackage ../packages/molthouse-manager.nix { };
   molthouseRuntimeAssetsPackage = pkgs.callPackage ../packages/molthouse-runtime-assets.nix { };
   openclawMountdPackage = pkgs.callPackage ../packages/openclaw-mountd.nix { };
+  molthouseShareArgsScript = pkgs.writeShellScript "molthouse-openclaw-share-args" ''
+    exec ${molthousedPackage}/bin/molthoused print-qemu-share-args
+  '';
   openclawRuntimeConfigDir = "/var/lib/openclaw/config";
   openclawRuntimeConfigPath = "${openclawRuntimeConfigDir}/openclaw.json";
   openclawRuntimeEnvPath = "${openclawRuntimeConfigDir}/openclaw-gateway.env";
@@ -77,6 +81,11 @@ let
       link = cfg.network.parentInterface;
       mode = "bridge";
     };
+  };
+  openclawDefaultUserInterface = {
+    type = "user";
+    id = "openclaw0";
+    mac = defaultOpenclawMacAddress;
   };
 in
 {
@@ -169,8 +178,6 @@ in
 
         config =
           {
-            config,
-            lib,
             pkgs,
             ...
           }:
@@ -277,6 +284,7 @@ in
               preStart = ''
                 rm -f ${openclawConsoleSocketPath}
               '';
+              extraArgsScript = toString molthouseShareArgsScript;
               vsock.cid = 3;
               mem = 2049;
               vcpu = 1;
@@ -288,7 +296,9 @@ in
                 "-zlz4hc"
                 "-Eztailpacking"
               ];
-              interfaces = lib.optional networkConfigured openclawMacvtapInterface;
+              interfaces =
+                lib.optional networkConfigured openclawMacvtapInterface
+                ++ lib.optional (!networkConfigured) openclawDefaultUserInterface;
               volumes = [
                 {
                   image = "openclaw-state.img";

@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import posixpath
+import shlex
 import signal
 import socket
 import subprocess
@@ -35,6 +36,7 @@ CONFIG_PATH = STATE_DIR / "config.json"
 STATE_PATH = RUNTIME_DIR / "state.json"
 LAUNCH_PLAN_PATH = RUNTIME_DIR / "launch-plan.json"
 VM_RUNTIME_PATH = RUNTIME_DIR / "vm-runtime.json"
+BOOT_SHARES_PATH = RUNTIME_DIR / "boot-shares.json"
 PID_PATH = RUNTIME_DIR / "molthoused.pid"
 LOG_PATH = STATE_DIR / "molthoused.log"
 
@@ -50,6 +52,7 @@ GUEST_SHARE_HOME = env_or_default("MOLTHOUSE_GUEST_HOME", "/home/fleeti")
 GUEST_MOUNT_PORT = int(env_or_default("MOLTHOUSE_GUEST_MOUNT_PORT", "10770"))
 GUEST_VSOCK_CID = int(env_or_default("MOLTHOUSE_GUEST_VSOCK_CID", "3"))
 MICROVM_STATE_DIR = Path(env_or_default("MOLTHOUSE_MICROVM_STATE_DIR", "/var/lib/microvms"))
+VIRTIOFSD_SOCKET_GROUP = env_or_default("MOLTHOUSE_VIRTIOFSD_SOCKET_GROUP", "kvm")
 QMP_DEVICE_PREFIX = "molthouse-share-"
 QMP_CHARDEV_PREFIX = "molthouse-char-"
 
@@ -444,7 +447,7 @@ def save_config(config: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def load_json_file(path: Path) -> dict[str, Any]:
+def load_json_file(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -463,6 +466,62 @@ def share_signature(share: dict[str, Any]) -> tuple[str, str, str, bool]:
 
 def share_signatures(shares: list[dict[str, Any]]) -> list[tuple[str, str, str, bool]]:
     return [share_signature(share) for share in shares]
+
+
+def load_boot_shares() -> list[dict[str, Any]]:
+    if not BOOT_SHARES_PATH.exists():
+        return []
+
+    payload = load_json_file(BOOT_SHARES_PATH)
+    if not isinstance(payload, list):
+        raise ConfigError("boot shares must be a list")
+    return [normalize_share(index, share) for index, share in enumerate(payload)]
+
+
+def write_boot_shares(shares: list[dict[str, Any]]) -> None:
+    write_json(BOOT_SHARES_PATH, shares)
+
+
+def clear_boot_shares() -> None:
+    BOOT_SHARES_PATH.unlink(missing_ok=True)
+
+
+def build_qemu_share_args(
+    config: dict[str, Any],
+    shares: list[dict[str, Any]],
+    *,
+    include_memory_backend: bool = True,
+) -> list[str]:
+    if shares == []:
+        return []
+
+    args: list[str] = []
+    if include_memory_backend:
+        args.extend(
+            [
+                "-numa",
+                "node,memdev=mem",
+                "-object",
+                f"memory-backend-memfd,id=mem,size={config['vm']['memory_mib']}M,share=on",
+            ]
+        )
+
+    for index, share in enumerate(shares):
+        share_id = share["id"]
+        args.extend(
+            [
+                "-chardev",
+                f"socket,id=fs{index},path={share_socket_path(share_id)}",
+                "-device",
+                f"vhost-user-fs-device,chardev=fs{index},tag={share_qmp_tag(share_id)}",
+            ]
+        )
+
+    return args
+
+
+def render_qemu_share_args(config: dict[str, Any], shares: list[dict[str, Any]]) -> str:
+    return shlex.join(build_qemu_share_args(config, shares))
 
 
 def append_log(level: str, message: str, details: dict[str, Any] | None = None) -> None:
@@ -851,6 +910,7 @@ def build_qemu_command(config: dict[str, Any]) -> list[str]:
     runtime = config["runtime"]
     vm = config["vm"]
     guest = config["guest"]
+    shares = load_boot_shares() or config["shares"]
 
     command = [
         runtime_support["qemu_binary"],
@@ -909,6 +969,8 @@ def build_qemu_command(config: dict[str, Any]) -> list[str]:
         ]
     )
 
+    command.extend(build_qemu_share_args(config, shares, include_memory_backend=False))
+
     return command
 
 
@@ -940,6 +1002,7 @@ def runtime_paths(config: dict[str, Any]) -> dict[str, str]:
     paths = {
         "config": str(CONFIG_PATH),
         "log": str(LOG_PATH),
+        "boot_shares": str(BOOT_SHARES_PATH),
         "state": str(STATE_PATH),
         "launch_plan": str(LAUNCH_PLAN_PATH),
         "vm_runtime": str(VM_RUNTIME_PATH),
@@ -1093,6 +1156,8 @@ def write_state(
 
     if config is not None:
         vm = config["vm"]
+        boot_signatures = share_signatures(load_boot_shares())
+        configured_signatures = share_signatures(config["shares"])
         payload["paths"] = runtime_paths(config)
         payload["vm"] = {
             "name": vm["name"],
@@ -1101,8 +1166,9 @@ def write_state(
             "boot_blockers": blockers,
             "console_available": console_available,
             "pid": vm_pid,
-            "restart_required": False,
-            "share_hotplug_enabled": True,
+            "restart_required": status == "running"
+            and configured_signatures != boot_signatures,
+            "share_hotplug_enabled": False,
             "shares_count": len(config["shares"]),
         }
 
@@ -1170,6 +1236,13 @@ class MolthouseDBusService:
         runtime_details = self.active_shares.get(share["id"])
         if runtime_details is None:
             payload["status"] = "configured" if not self._vm_running() else "pending"
+            return payload
+
+        active_share = runtime_details.get("share")
+        if not isinstance(active_share, dict) or share_signature(active_share) != share_signature(
+            share
+        ):
+            payload["status"] = "pending"
             return payload
 
         payload["status"] = runtime_details.get("status", "configured")
@@ -1311,6 +1384,8 @@ class MolthouseDBusService:
             share["source"],
             "--socket-path",
             str(socket_path),
+            "--socket-group",
+            VIRTIOFSD_SOCKET_GROUP,
             "--cache",
             "auto",
             "--log-level",
@@ -1393,198 +1468,59 @@ class MolthouseDBusService:
             },
         )
 
-    def _attach_share(self, config: dict[str, Any], share: dict[str, Any]) -> None:
-        share_id = share["id"]
-        chardev_id = share_qmp_chardev_id(share_id)
-        device_id = share_qmp_device_id(share_id)
-        socket_path = share_socket_path(share_id)
-        qmp_socket = read_qmp_socket_path(config)
+    def _boot_shares(self) -> list[dict[str, Any]]:
+        return load_boot_shares()
 
-        self._start_virtiofsd_process(config, share)
-        try:
-            with QMPConnection(qmp_socket) as qmp:
-                qmp.execute(
-                    "chardev-add",
-                    {
-                        "id": chardev_id,
-                        "backend": {
-                            "type": "socket",
-                            "data": {
-                                "addr": {
-                                    "type": "unix",
-                                    "data": {"path": str(socket_path)},
-                                },
-                                "wait": False,
-                            },
-                        },
-                    },
-                )
-                try:
-                    qmp.execute(
-                        "device_add",
-                        {
-                            "driver": "vhost-user-fs-pci",
-                            "id": device_id,
-                            "chardev": chardev_id,
-                            "tag": share_qmp_tag(share_id),
-                        },
-                    )
-                except Exception:
-                    qmp.execute("chardev-remove", {"id": chardev_id})
-                    raise
+    def _clear_share_runtime(self) -> None:
+        self._stop_virtiofsd_processes()
+        self.active_shares.clear()
+        self.applied_share_signatures = []
+        clear_boot_shares()
 
-            self._guest_mount_share(config, share)
-        except Exception:
-            try:
-                with QMPConnection(qmp_socket) as qmp:
-                    try:
-                        qmp.execute("device_del", {"id": device_id})
-                        qmp.wait_for_event(
-                            "DEVICE_DELETED",
-                            predicate=lambda event: event.get("data", {}).get("device")
-                            == device_id,
-                            timeout=5,
-                        )
-                    except Exception:
-                        pass
-                    try:
-                        qmp.execute("chardev-remove", {"id": chardev_id})
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            self._stop_virtiofsd_process(share_id)
-            raise
+    def _prepare_boot_shares(self, config: dict[str, Any]) -> list[dict[str, Any]]:
+        shares = [dict(share) for share in config["shares"]]
+        write_boot_shares(shares)
+        self._stop_virtiofsd_processes()
+        for share in shares:
+            self._start_virtiofsd_process(config, share)
+        return shares
 
-        self.active_shares[share_id] = {
-            "share": dict(share),
-            "status": "active",
-            "last_error": None,
-        }
+    def _start_boot_share_processes(self, config: dict[str, Any]) -> None:
+        for share in self._boot_shares():
+            self._start_virtiofsd_process(config, share)
 
-    def _detach_share(
-        self,
-        config: dict[str, Any],
-        share: dict[str, Any],
-        *,
-        best_effort: bool = False,
-    ) -> None:
-        share_id = share["id"]
-        qmp_socket = read_qmp_socket_path(config)
-        device_id = share_qmp_device_id(share_id)
-        chardev_id = share_qmp_chardev_id(share_id)
-
-        if self._vm_running():
-            try:
-                self._guest_unmount_share(config, share)
-            except Exception:
-                if not best_effort:
-                    raise
-
-            try:
-                with QMPConnection(qmp_socket) as qmp:
-                    try:
-                        qmp.execute("device_del", {"id": device_id})
-                        qmp.wait_for_event(
-                            "DEVICE_DELETED",
-                            predicate=lambda event: event.get("data", {}).get("device")
-                            == device_id,
-                            timeout=5,
-                        )
-                    except Exception as err:
-                        if not best_effort and "not found" not in str(err).lower():
-                            raise
-                    try:
-                        qmp.execute("chardev-remove", {"id": chardev_id})
-                    except Exception as err:
-                        if not best_effort and "not found" not in str(err).lower():
-                            raise
-            except Exception:
-                if not best_effort:
-                    raise
-
-        self._stop_virtiofsd_process(share_id)
-        self.active_shares.pop(share_id, None)
-
-    def _reconcile_live_shares(
-        self, config: dict[str, Any], *, force_reconcile: bool = False
-    ) -> None:
+    def _reconcile_boot_shares(self, config: dict[str, Any]) -> None:
         if not self._vm_running():
             self.active_shares.clear()
             self.applied_share_signatures = []
             return
 
-        self._wait_for_qmp_socket(config)
+        boot_shares = self._boot_shares()
+        self.active_shares.clear()
+        applied_signatures: list[tuple[str, str, str, bool]] = []
+        failures: list[str] = []
 
-        if force_reconcile:
-            qmp_socket = read_qmp_socket_path(config)
-            with QMPConnection(qmp_socket) as qmp:
-                device_ids, chardev_ids = self._managed_qmp_state(qmp)
-                for share in config["shares"]:
-                    try:
-                        self._guest_unmount_share(config, share)
-                    except Exception:
-                        pass
-                for device_id in sorted(device_ids):
-                    try:
-                        qmp.execute("device_del", {"id": device_id})
-                    except Exception:
-                        continue
-                for device_id in sorted(device_ids):
-                    try:
-                        qmp.wait_for_event(
-                            "DEVICE_DELETED",
-                            predicate=lambda event, expected=device_id: event.get(
-                                "data", {}
-                            ).get("device")
-                            == expected,
-                            timeout=5,
-                        )
-                    except Exception:
-                        pass
-                for chardev_id in sorted(chardev_ids):
-                    try:
-                        qmp.execute("chardev-remove", {"id": chardev_id})
-                    except Exception:
-                        pass
-            self._stop_virtiofsd_processes()
-            self.active_shares.clear()
+        for share in boot_shares:
+            status = "active"
+            last_error: str | None = None
+            try:
+                self._guest_mount_share(config, share)
+                applied_signatures.append(share_signature(share))
+            except Exception as err:
+                status = "failed"
+                last_error = str(err)
+                failures.append(f"{share['id']}: {err}")
 
-        configured_by_id = {share["id"]: share for share in config["shares"]}
+            self.active_shares[share["id"]] = {
+                "share": dict(share),
+                "status": status,
+                "last_error": last_error,
+            }
 
-        for share_id, details in list(self.active_shares.items()):
-            configured_share = configured_by_id.get(share_id)
-            active_share = details.get("share", {})
-            if configured_share is None:
-                self._detach_share(config, active_share, best_effort=False)
-                continue
-            if share_signature(configured_share) != share_signature(active_share):
-                self._detach_share(config, active_share, best_effort=False)
-                continue
-            if details.get("status") != "active":
-                self._detach_share(config, active_share, best_effort=True)
+        self.applied_share_signatures = applied_signatures
 
-        for share in config["shares"]:
-            existing = self.active_shares.get(share["id"])
-            if (
-                existing is not None
-                and existing.get("status") == "active"
-                and share_signature(existing["share"]) == share_signature(share)
-            ):
-                continue
-            self._attach_share(config, share)
-
-        self.applied_share_signatures = share_signatures(
-            [
-                share
-                for share in config["shares"]
-                if self.active_shares.get(share["id"], {}).get("status") == "active"
-            ]
-        )
-
-    def _start_virtiofsd_processes(self, config: dict[str, Any]) -> None:
-        for share in config["shares"]:
-            self._start_virtiofsd_process(config, share)
+        if failures:
+            raise RuntimeError("Failed to mount boot shares: " + "; ".join(failures))
 
     def _stop_virtiofsd_processes(self) -> None:
         for share_id in list(self.virtiofsd_processes.keys()):
@@ -1634,9 +1570,10 @@ class MolthouseDBusService:
 
             try:
                 config = load_config()
+                self._prepare_boot_shares(config)
                 run_systemctl(["start", SYSTEMD_VM_SERVICE], check=True)
                 self._wait_for_qmp_socket(config)
-                self._reconcile_live_shares(config, force_reconcile=True)
+                self._reconcile_boot_shares(config)
                 refresh = self.refresh_runtime("systemctl-start", emit_signals=False)
                 state_payload = refresh.get("state", load_state_payload())
                 status = state_payload.get("status")
@@ -1662,6 +1599,11 @@ class MolthouseDBusService:
                     "state": state_payload,
                 }
             except Exception as err:
+                try:
+                    run_systemctl(["stop", SYSTEMD_VM_SERVICE], check=False)
+                except Exception:
+                    pass
+                self._clear_share_runtime()
                 append_log("ERROR", "Failed to start MoltHouse VM", {"error": str(err)})
                 self._write_runtime_state("failed", last_error=str(err))
                 self._emit_runtime_signals()
@@ -1698,8 +1640,9 @@ class MolthouseDBusService:
         append_log("INFO", "Starting MoltHouse VM")
 
         try:
+            self._prepare_boot_shares(config)
             self._start_vm_process(config)
-            self._reconcile_live_shares(config)
+            self._reconcile_boot_shares(config)
             self._write_runtime_state("running", last_error=None)
             self._emit_runtime_signals()
             return {
@@ -1711,10 +1654,8 @@ class MolthouseDBusService:
         except Exception as err:
             append_log("ERROR", "Failed to start MoltHouse VM", {"error": str(err)})
             self._stop_vm_process()
-            self._stop_virtiofsd_processes()
+            self._clear_share_runtime()
             self._cleanup_runtime_paths()
-            self.active_shares.clear()
-            self.applied_share_signatures = []
             self._write_runtime_state("failed", last_error=str(err))
             self._emit_runtime_signals()
             return {
@@ -1729,6 +1670,7 @@ class MolthouseDBusService:
         if service_managed_vm():
             status, _vm_pid, _last_error = systemd_vm_state()
             if status == "stopped":
+                self._clear_share_runtime()
                 self._write_runtime_state("stopped")
                 return {
                     "ok": True,
@@ -1745,11 +1687,9 @@ class MolthouseDBusService:
 
             try:
                 run_systemctl(["stop", SYSTEMD_VM_SERVICE], check=True)
-                self._stop_virtiofsd_processes()
-                self.active_shares.clear()
+                self._clear_share_runtime()
                 self._cleanup_runtime_paths()
                 refresh = self.refresh_runtime("systemctl-stop", emit_signals=False)
-                self.applied_share_signatures = []
                 self._emit_runtime_signals()
                 return {
                     "ok": True,
@@ -1768,6 +1708,7 @@ class MolthouseDBusService:
                 }
 
         if not self._vm_running():
+            self._clear_share_runtime()
             self._write_runtime_state("stopped")
             return {
                 "ok": True,
@@ -1778,9 +1719,8 @@ class MolthouseDBusService:
         self._write_runtime_state("stopping", last_error=None)
         append_log("INFO", "Stopping MoltHouse VM")
         self._stop_vm_process()
-        self._stop_virtiofsd_processes()
+        self._clear_share_runtime()
         self._cleanup_runtime_paths()
-        self.applied_share_signatures = []
         self._write_runtime_state("stopped", last_error=None)
         self._emit_runtime_signals()
         return {
@@ -1791,63 +1731,35 @@ class MolthouseDBusService:
 
     def _restart_vm(self) -> dict[str, Any]:
         if service_managed_vm():
-            self._write_runtime_state("stopping", last_error=None)
             append_log(
                 "INFO",
                 "Restarting MoltHouse VM",
                 {"service": SYSTEMD_VM_SERVICE, "backend": "systemd-service"},
             )
 
-            try:
-                config = load_config()
-                run_systemctl(["restart", SYSTEMD_VM_SERVICE], check=True)
-                self._stop_virtiofsd_processes()
-                self.active_shares.clear()
-                self._wait_for_qmp_socket(config)
-                self._reconcile_live_shares(config, force_reconcile=True)
-                refresh = self.refresh_runtime("systemctl-restart", emit_signals=False)
-                state_payload = refresh.get("state", load_state_payload())
-                status = state_payload.get("status")
-                self._emit_runtime_signals()
-                if status != "running":
-                    return {
-                        "ok": False,
-                        "code": "restart_failed",
-                        "message": state_payload.get(
-                            "last_error",
-                            f"{SYSTEMD_VM_SERVICE} did not report a running state after restart.",
-                        ),
-                        "state": state_payload,
-                    }
-                return {
-                    "ok": True,
-                    "message": "VM restarted.",
-                    "state": state_payload,
-                }
-            except Exception as err:
-                append_log("ERROR", "Failed to restart MoltHouse VM", {"error": str(err)})
-                self._write_runtime_state("failed", last_error=str(err))
-                self._emit_runtime_signals()
-                return {
-                    "ok": False,
-                    "code": "restart_failed",
-                    "message": str(err),
-                    "state": load_state_payload(),
-                }
-
         stop_payload = self._stop_vm()
         if not stop_payload.get("ok", False):
+            if service_managed_vm():
+                stop_payload["code"] = "restart_failed"
             return stop_payload
-        return self._start_vm()
+        start_payload = self._start_vm()
+        if not start_payload.get("ok", False):
+            start_payload["code"] = "restart_failed"
+            return start_payload
+
+        start_payload["message"] = "VM restarted."
+        return start_payload
 
     def _poll_vm(self) -> bool:
         if service_managed_vm():
             try:
                 status, _vm_pid, last_error = systemd_vm_state()
-                if status != "running" and self.virtiofsd_processes:
-                    self._stop_virtiofsd_processes()
-                    self.active_shares.clear()
-                    self.applied_share_signatures = []
+                if status != "running" and (
+                    self.virtiofsd_processes
+                    or self.active_shares
+                    or BOOT_SHARES_PATH.exists()
+                ):
+                    self._clear_share_runtime()
                 current_state = load_state_payload()
                 if (
                     current_state.get("status") != status
@@ -1876,10 +1788,9 @@ class MolthouseDBusService:
                 "qemu exited unexpectedly",
                 {"returncode": returncode},
             )
-            self._stop_virtiofsd_processes()
+            self._clear_share_runtime()
             self.vm_process = None
             self._cleanup_runtime_paths()
-            self.active_shares.clear()
             self._write_runtime_state(
                 "failed",
                 last_error=f"qemu exited unexpectedly with code {returncode}",
@@ -1927,17 +1838,9 @@ class MolthouseDBusService:
             else:
                 status = "running" if self._vm_running() else "stopped"
 
-            if status == "running" and reason in {
-                "config-changed",
-                "service-start",
-                "share-added",
-                "share-removed",
-                "share-updated",
-                "signal-hup",
-            }:
-                self._reconcile_live_shares(
-                    load_config(), force_reconcile=(reason == "service-start")
-                )
+            if status == "running" and reason == "service-start":
+                self._start_boot_share_processes(load_config())
+                self._reconcile_boot_shares(load_config())
 
             config, blockers = self._write_runtime_state(status, last_error=last_error)
             if blockers:
@@ -2006,7 +1909,7 @@ class MolthouseDBusService:
         self.exit_code = exit_code
         try:
             self._stop_vm_process()
-            self._stop_virtiofsd_processes()
+            self._clear_share_runtime()
             self._cleanup_runtime_paths()
             config, blockers = self._write_runtime_state("stopping", last_error=None)
             self._emit_runtime_signals()
@@ -2093,27 +1996,9 @@ class MolthouseDBusService:
         reason: str,
     ) -> dict[str, Any]:
         save_config(next_config)
-        try:
-            if self._vm_running():
-                self._reconcile_live_shares(load_config())
-        except Exception as err:
-            save_config(previous_config)
-            if self._vm_running():
-                try:
-                    self._reconcile_live_shares(previous_config, force_reconcile=True)
-                except Exception as rollback_err:
-                    append_log(
-                        "ERROR",
-                        "Failed to roll back live share changes",
-                        {"error": str(rollback_err)},
-                    )
-            raise RuntimeError(str(err))
-
         refresh = self.refresh_runtime(reason)
         if not refresh.get("ok", False):
             save_config(previous_config)
-            if self._vm_running():
-                self._reconcile_live_shares(previous_config, force_reconcile=True)
             raise RuntimeError(str(refresh.get("message", "failed to refresh runtime")))
         return refresh
 
@@ -2366,6 +2251,41 @@ def print_json(path: Path) -> int:
     return 0
 
 
+def read_vm_memory_mib_for_share_args() -> int:
+    if not CONFIG_PATH.exists():
+        return default_config()["vm"]["memory_mib"]
+
+    payload = load_json_file(CONFIG_PATH)
+    if not isinstance(payload, dict):
+        raise ConfigError("config must be a JSON object")
+
+    vm = payload.get("vm")
+    if not isinstance(vm, dict):
+        raise ConfigError("vm must be an object")
+
+    memory_mib = vm.get("memory_mib")
+    if not isinstance(memory_mib, int) or memory_mib < 1:
+        raise ConfigError("vm.memory_mib must be a positive integer")
+
+    return memory_mib
+
+
+def print_qemu_share_args() -> int:
+    ensure_runtime_dirs()
+    shares = load_boot_shares()
+    if shares == []:
+        sys.stdout.write("\n")
+        return 0
+
+    config = {
+        "vm": {
+            "memory_mib": read_vm_memory_mib_for_share_args(),
+        }
+    }
+    sys.stdout.write(render_qemu_share_args(config, shares) + "\n")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MoltHouse privileged helper")
     subparsers = parser.add_subparsers(dest="command")
@@ -2382,6 +2302,10 @@ def main() -> int:
     )
     subparsers.add_parser(
         "print-config", help="Print the current MoltHouse config JSON"
+    )
+    subparsers.add_parser(
+        "print-qemu-share-args",
+        help="Print runtime QEMU arguments for boot shares",
     )
     subparsers.add_parser("serve", help="Run the MoltHouse privileged helper loop")
 
@@ -2404,6 +2328,9 @@ def main() -> int:
             config = default_config()
             write_json(CONFIG_PATH, config)
         return print_json(CONFIG_PATH)
+
+    if args.command == "print-qemu-share-args":
+        return print_qemu_share_args()
 
     if args.command == "serve":
         return serve()

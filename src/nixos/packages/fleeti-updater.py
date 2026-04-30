@@ -165,6 +165,7 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         self.set_default_size(560, 360)
 
         self.available_version = None
+        self.pending_update = False
         self.system_version = read_os_release_field("IMAGE_VERSION") or "unknown"
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
@@ -265,7 +266,7 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
 
         self.set_busy(None)
         self.show_idle()
-        self.check_pending_update()
+        self.check_pending_update(is_startup=True)
 
     def set_busy(self, message):
         is_busy = bool(message)
@@ -339,12 +340,19 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         self.set_status(message)
         self.set_busy(None)
 
+    def show_pending_update(self):
+        self.show_reboot_required(
+            "A previously installed Fleeti update is ready. Reboot to finish applying it."
+        )
+
     def show_update_available(self, details):
         version = details["version"]
         self.available_version = version
         self.hide_details()
         self.hide_actions()
         self.install_button.set_visible(True)
+        if self.pending_update:
+            self.reboot_button.set_visible(True)
         self.release_box.set_visible(True)
         self.release_label.set_text(f"Release {version} is available to install.")
 
@@ -356,7 +364,12 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         else:
             self.changelog_label.set_visible(False)
 
-        self.set_status("A newer Fleeti release is ready.")
+        if self.pending_update:
+            self.set_status(
+                "A newer Fleeti release is ready. Another installed update is still pending a reboot."
+            )
+        else:
+            self.set_status("A newer Fleeti release is ready.")
         self.set_busy(None)
 
     def show_error(self, message):
@@ -376,7 +389,8 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
 
-    def check_pending_update(self):
+    def check_pending_update(self, is_startup):
+        self.pending_update = False
         self.hide_actions()
         self.hide_release()
         self.hide_details()
@@ -384,15 +398,14 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         self.set_busy("Checking if a reboot is already required...")
         self.run_async(
             [SYSTEMD_SYSUPDATE, "--no-pager", "pending"],
-            self.on_pending_checked,
+            lambda result: self.on_pending_checked(is_startup, result),
         )
 
-    def on_pending_checked(self, result):
+    def on_pending_checked(self, is_startup, result):
         stderr = result.stderr.strip()
         if result.returncode == 0:
-            self.show_reboot_required(
-                "A previously installed Fleeti update is ready. Reboot to finish applying it."
-            )
+            self.pending_update = True
+            self.check_for_updates(is_startup=is_startup)
             return False
 
         privileged_failure = get_privileged_command_failure(stderr)
@@ -408,10 +421,13 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
             )
             return False
 
-        self.show_idle()
+        self.check_for_updates(is_startup=is_startup)
         return False
 
     def on_check_clicked(self, _button):
+        self.check_pending_update(is_startup=False)
+
+    def check_for_updates(self, is_startup):
         self.hide_actions()
         self.hide_release()
         self.hide_details()
@@ -419,10 +435,10 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         self.set_busy("Checking for available updates...")
         self.run_async(
             [SYSTEMD_SYSUPDATE, "--json=short", "--no-pager", "check-new"],
-            self.on_check_finished,
+            lambda result: self.on_check_finished(is_startup, result),
         )
 
-    def on_check_finished(self, result):
+    def on_check_finished(self, is_startup, result):
         stderr = result.stderr.strip()
         payload = parse_check_new_response(result.stdout)
 
@@ -432,10 +448,7 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
                 self.fetch_release_details(available)
                 return False
 
-            self.show_idle()
-            self.set_status(
-                "This system is already on the latest available Fleeti release."
-            )
+            self.show_post_check_state(is_startup)
             return False
 
         privileged_failure = get_privileged_command_failure(stderr)
@@ -446,10 +459,7 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
             return False
 
         if result.returncode != 0 and (not stderr or is_sysupdate_status_output(stderr)):
-            self.show_idle()
-            self.set_status(
-                "This system is already on the latest available Fleeti release."
-            )
+            self.show_post_check_state(is_startup)
             return False
 
         if stderr:
@@ -460,6 +470,17 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
             "Failed to check for updates: systemd-sysupdate returned invalid JSON."
         )
         return False
+
+    def show_post_check_state(self, is_startup):
+        if self.pending_update:
+            self.show_pending_update()
+            return
+
+        self.show_idle()
+        if not is_startup:
+            self.set_status(
+                "This system is already on the latest available Fleeti release."
+            )
 
     def fetch_release_details(self, version):
         self.available_version = version

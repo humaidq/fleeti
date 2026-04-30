@@ -17,7 +17,10 @@
           Type = "url-file";
         };
 
-        Transfer.Verify = "no";
+        Transfer = {
+          ProtectVersion = "%A";
+          Verify = "no";
+        };
       in
       {
         "10-nix-store" = {

@@ -15,7 +15,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gio", "2.0")
 
-from gi.repository import Gio, GLib, Gtk
+from gi.repository import Gio, GLib, GObject, Gtk
 
 
 def env_or_default(name: str, fallback: str) -> str:
@@ -94,6 +94,46 @@ def format_molthoused_error(message: str) -> str:
         )
 
     return f"Failed to contact molthoused: {message}"
+
+
+class LogEntryRow(GObject.Object):
+    def __init__(self, timestamp: str, level: str, entry: str) -> None:
+        super().__init__()
+        self.timestamp = timestamp
+        self.level = level
+        self.entry = entry
+
+
+def log_level_markup(level: str) -> str:
+    escaped_level = GLib.markup_escape_text(level)
+    normalized = level.upper()
+    if normalized == "ERROR":
+        color = "#c01c28"
+    elif normalized in {"WARN", "WARNING"}:
+        color = "#9a6700"
+    elif normalized == "INFO":
+        color = "#1a5fb4"
+    else:
+        color = "#5e5c64"
+    return f"<span foreground='{color}' weight='bold'>{escaped_level}</span>"
+
+
+def vm_status_markup(status: str) -> str:
+    escaped_status = GLib.markup_escape_text(status.replace("_", " ").title())
+    normalized = status.lower()
+    if normalized == "running":
+        color = "#2b7a0b"
+    elif normalized == "starting":
+        color = "#1a5fb4"
+    elif normalized == "stopping":
+        color = "#9a6700"
+    elif normalized == "failed":
+        color = "#c01c28"
+    elif normalized == "stopped":
+        color = "#5e5c64"
+    else:
+        color = "#6c6c6c"
+    return f"<span foreground='{color}' weight='bold'>{escaped_status}</span>"
 
 
 class MolthouseClient:
@@ -218,11 +258,11 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         self.console_payload: dict[str, Any] = {}
         self.selected_share_id: str | None = None
 
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-        root.set_margin_top(16)
-        root.set_margin_bottom(16)
-        root.set_margin_start(16)
-        root.set_margin_end(16)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        root.set_margin_top(20)
+        root.set_margin_bottom(20)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
 
         heading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         title = Gtk.Label()
@@ -231,8 +271,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
 
         subtitle = Gtk.Label(
             label=(
-                "Local runtime control for the OpenClaw VM. "
-                "MoltHouse talks to the privileged helper over D-Bus and keeps runtime settings on this machine."
+                "A sandboxed runtime for OpenClaw."
             )
         )
         subtitle.set_wrap(True)
@@ -251,16 +290,24 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         stack = Gtk.Stack()
         stack.set_hexpand(True)
         stack.set_vexpand(True)
+        stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
 
-        switcher = Gtk.StackSwitcher()
-        switcher.set_stack(stack)
-        switcher.set_halign(Gtk.Align.START)
-        root.append(switcher)
+        sidebar = Gtk.StackSidebar()
+        sidebar.set_stack(stack)
+        sidebar.set_vexpand(True)
+        sidebar.set_size_request(220, -1)
 
         stack.add_titled(self.build_overview_page(), "overview", "Overview")
         stack.add_titled(self.build_shares_page(), "shares", "Shares")
         stack.add_titled(self.build_logs_page(), "logs", "Logs")
-        root.append(stack)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        content.set_hexpand(True)
+        content.set_vexpand(True)
+        content.append(sidebar)
+        content.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        content.append(stack)
+        root.append(content)
 
         self.set_child(root)
         self.refresh_all(show_success=False)
@@ -333,6 +380,94 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         label.set_xalign(0)
         return label
 
+    def build_page_shell(
+        self, title: str, description: str, content: Gtk.Widget
+    ) -> Gtk.Widget:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        page.set_margin_top(8)
+        page.set_margin_bottom(8)
+        page.set_margin_start(8)
+        page.set_margin_end(8)
+
+        heading = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        title_label = Gtk.Label()
+        title_label.set_markup(f"<span size='large' weight='bold'>{title}</span>")
+        title_label.set_xalign(0)
+
+        description_label = Gtk.Label(label=description)
+        description_label.set_wrap(True)
+        description_label.set_xalign(0)
+
+        heading.append(title_label)
+        heading.append(description_label)
+
+        page.append(heading)
+        page.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        page.append(content)
+        return page
+
+    def parse_log_row(self, line: str) -> LogEntryRow:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return LogEntryRow("", "", line)
+
+        timestamp = str(record.get("timestamp", ""))
+        level = str(record.get("level", ""))
+        message = str(record.get("message", line))
+        details = record.get("details")
+        if details not in (None, {}, []):
+            message = f"{message}\n{json.dumps(details, sort_keys=True)}"
+        return LogEntryRow(timestamp, level, message)
+
+    def build_log_column(
+        self,
+        title: str,
+        value_getter,
+        *,
+        expand: bool = False,
+        monospace: bool = False,
+        markup: bool = False,
+    ) -> Gtk.ColumnViewColumn:
+        factory = Gtk.SignalListItemFactory()
+        factory.connect("setup", self.on_log_column_setup, monospace)
+        factory.connect("bind", self.on_log_column_bind, value_getter, markup)
+
+        column = Gtk.ColumnViewColumn.new(title, factory)
+        column.set_expand(expand)
+        column.set_resizable(True)
+        return column
+
+    def on_log_column_setup(
+        self,
+        _factory: Gtk.SignalListItemFactory,
+        list_item: Gtk.ListItem,
+        monospace: bool,
+    ) -> None:
+        label = Gtk.Label(xalign=0)
+        label.set_wrap(True)
+        label.set_selectable(True)
+        if monospace:
+            label.add_css_class("monospace")
+        list_item.set_child(label)
+
+    def on_log_column_bind(
+        self,
+        _factory: Gtk.SignalListItemFactory,
+        list_item: Gtk.ListItem,
+        value_getter,
+        markup: bool,
+    ) -> None:
+        item = list_item.get_item()
+        child = list_item.get_child()
+        if item is None or child is None:
+            return
+        value = value_getter(item)
+        if markup:
+            child.set_markup(value)
+            return
+        child.set_text(value)
+
     def clear_listbox(self, listbox: Gtk.ListBox) -> None:
         child = listbox.get_first_child()
         while child is not None:
@@ -341,9 +476,9 @@ class MolthouseWindow(Gtk.ApplicationWindow):
             child = next_child
 
     def build_overview_page(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self.refresh_button = Gtk.Button(label="Refresh")
         self.refresh_button.connect(
             "clicked", lambda _button: self.refresh_all(show_success=True)
@@ -370,17 +505,15 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         actions.append(self.open_console_button)
         box.append(actions)
 
-        summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        summary.append(self.section_heading("VM State"))
+        summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        summary.append(self.section_heading("Current State"))
         self.overview_status_label = Gtk.Label(xalign=0)
+        self.overview_status_label.set_use_markup(True)
         self.overview_vm_name_label = Gtk.Label(xalign=0)
         self.overview_boot_ready_label = Gtk.Label(xalign=0)
         self.overview_shares_count_label = Gtk.Label(xalign=0)
         self.overview_last_error_label = Gtk.Label(xalign=0)
         self.overview_last_error_label.set_wrap(True)
-        self.overview_details_label = Gtk.Label(xalign=0)
-        self.overview_details_label.set_wrap(True)
-        self.overview_details_label.set_selectable(True)
 
         summary.append(self.overview_status_label)
         summary.append(self.overview_vm_name_label)
@@ -390,9 +523,27 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         self.overview_restart_required_label = Gtk.Label(xalign=0)
         self.overview_restart_required_label.set_wrap(True)
         summary.append(self.overview_restart_required_label)
-        summary.append(self.overview_details_label)
         box.append(summary)
-        return box
+
+        self.overview_boot_blockers_label = Gtk.Label(xalign=0)
+        self.overview_boot_blockers_label.set_wrap(True)
+        self.overview_boot_blockers_label.set_selectable(True)
+        self.overview_boot_blockers_label.set_visible(False)
+        box.append(self.overview_boot_blockers_label)
+
+        self.overview_details_label = Gtk.Label(xalign=0)
+        self.overview_details_label.set_wrap(True)
+        self.overview_details_label.set_selectable(True)
+
+        details_expander = Gtk.Expander(label="Runtime Paths and Sockets")
+        details_expander.set_expanded(False)
+        details_expander.set_child(self.overview_details_label)
+        box.append(details_expander)
+        return self.build_page_shell(
+            "Overview",
+            "Inspect the VM state and run common MoltHouse actions.",
+            box,
+        )
 
     def update_overview_page(self) -> None:
         state = self.state_payload
@@ -400,7 +551,9 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         paths = state.get("paths", {})
 
         status = state.get("status", "unknown")
-        self.overview_status_label.set_text(f"Status: {status}")
+        self.overview_status_label.set_markup(
+            f"Status: {vm_status_markup(str(status))}"
+        )
         self.overview_vm_name_label.set_text(f"VM name: {vm.get('name', 'unknown')}")
         self.overview_boot_ready_label.set_text(
             f"Boot ready: {'yes' if vm.get('boot_ready', False) else 'no'}"
@@ -421,11 +574,11 @@ class MolthouseWindow(Gtk.ApplicationWindow):
             "applied_shares_count", 0
         ):
             self.overview_restart_required_label.set_text(
-                "Live share hotplug is enabled, but one or more configured shares are still pending or failed."
+                "One or more boot-time shares are still pending or failed. Restart the VM after fixing the issue to reapply them."
             )
         else:
             self.overview_restart_required_label.set_text(
-                "Live share hotplug is enabled for the running VM."
+                "Share changes are applied when the VM starts. Restart the VM after editing shares."
             )
 
         self.open_console_button.set_sensitive(self.console_socket_exists())
@@ -444,8 +597,14 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         ]
         boot_blockers = vm.get("boot_blockers", [])
         if boot_blockers:
-            details.append("Boot blockers:")
-            details.extend(f"- {blocker}" for blocker in boot_blockers)
+            blockers_text = "Boot blockers:\n" + "\n".join(
+                f"- {blocker}" for blocker in boot_blockers
+            )
+            self.overview_boot_blockers_label.set_text(blockers_text)
+            self.overview_boot_blockers_label.set_visible(True)
+        else:
+            self.overview_boot_blockers_label.set_text("")
+            self.overview_boot_blockers_label.set_visible(False)
         self.overview_details_label.set_text("\n".join(details))
 
     def on_open_vm_console(self, _button: Gtk.Button) -> None:
@@ -469,7 +628,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
                     BUS_KIND,
                     "console",
                 ],
-                Gio.SubprocessFlags.SEARCH_PATH,
+                Gio.SubprocessFlags.SEARCH_PATH_FROM_ENVP,
             )
         except GLib.Error as err:
             self.set_feedback(f"Failed to open the VM console: {err.message}", error=True)
@@ -478,7 +637,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         self.set_feedback("Opened the MoltHouse VM console.")
 
     def build_shares_page(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
 
         notice = Gtk.Label(
             label=(
@@ -490,7 +649,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         box.append(notice)
         self.shares_notice_label = notice
 
-        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         refresh_button = Gtk.Button(label="Refresh shares")
         refresh_button.connect(
             "clicked", lambda _button: self.refresh_all(show_success=True)
@@ -506,7 +665,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         scroller.set_child(self.shares_listbox)
         box.append(scroller)
 
-        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         form.append(self.section_heading("Add or Edit Share"))
 
         self.share_source_entry = Gtk.Entry()
@@ -548,7 +707,11 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         form.append(chooser_row)
         form.append(self.share_form_status)
         box.append(form)
-        return box
+        return self.build_page_shell(
+            "Shares",
+            "Manage host folders that MoltHouse exposes inside the OpenClaw VM.",
+            box,
+        )
 
     def update_shares_page(self) -> None:
         shares = self.shares_payload.get("shares", [])
@@ -557,11 +720,11 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         failed_shares = [share for share in shares if share.get("status") == "failed"]
         if failed_shares:
             self.shares_notice_label.set_text(
-                "One or more shares failed to apply live. Review the status shown for each share below."
+                "One or more boot-time shares failed to mount. Review the status shown for each share below, then restart the VM after fixing the issue."
             )
         elif state_status == "running":
             self.shares_notice_label.set_text(
-                "Share changes are applied live while the VM is running. Newly saved shares should appear in the guest immediately."
+                "Share changes are saved immediately, but the running VM keeps its current share set until you restart it."
             )
         else:
             self.shares_notice_label.set_text(
@@ -752,7 +915,7 @@ class MolthouseWindow(Gtk.ApplicationWindow):
         self.refresh_all(show_success=False)
 
     def build_logs_page(self) -> Gtk.Widget:
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
 
         refresh_button = Gtk.Button(label="Refresh logs")
         refresh_button.connect(
@@ -766,21 +929,41 @@ class MolthouseWindow(Gtk.ApplicationWindow):
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_vexpand(True)
-        self.logs_view = Gtk.TextView()
-        self.logs_view.set_editable(False)
-        self.logs_view.set_cursor_visible(False)
-        self.logs_view.set_monospace(True)
+        self.logs_store = Gio.ListStore.new(LogEntryRow)
+        self.logs_view = Gtk.ColumnView()
+        self.logs_view.set_model(Gtk.NoSelection.new(self.logs_store))
+        self.logs_view.set_show_row_separators(True)
+        self.logs_view.append_column(
+            self.build_log_column("Timestamp", lambda row: row.timestamp)
+        )
+        self.logs_view.append_column(
+            self.build_log_column(
+                "Level", lambda row: log_level_markup(row.level), markup=True
+            )
+        )
+        self.logs_view.append_column(
+            self.build_log_column(
+                "Entry", lambda row: row.entry, expand=True, monospace=True
+            )
+        )
         scroller.set_child(self.logs_view)
         box.append(scroller)
-        return box
+        return self.build_page_shell(
+            "Logs",
+            "Review recent MoltHouse helper output and VM-related errors.",
+            box,
+        )
 
     def update_logs_page(self) -> None:
         last_error = self.state_payload.get("last_error") or "No recent helper error"
         self.logs_error_label.set_text(f"Recent helper/VM error: {last_error}")
 
         lines = self.logs_payload.get("lines", [])
-        content = "\n".join(lines)
-        self.logs_view.get_buffer().set_text(content)
+        self.logs_store.remove_all()
+        for line in reversed(lines):
+            if not isinstance(line, str):
+                continue
+            self.logs_store.append(self.parse_log_row(line))
 
 
 class MolthouseManagerApplication(Gtk.Application):
