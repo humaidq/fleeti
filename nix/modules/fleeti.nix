@@ -40,7 +40,6 @@ in
       ensureUsers = [
         {
           name = "fleeti-service";
-          ensureDBOwnership = true;
         }
       ];
     };
@@ -53,14 +52,24 @@ in
 
     users.groups.fleeti-service = { };
 
+    # The PostgreSQL module only supports ensureDBOwnership when the
+    # database name matches the role name, so set Fleeti's DB owner explicitly.
+    systemd.services.postgresql-setup.script = mkAfter ''
+      psql -d postgres -tAc 'ALTER DATABASE "fleeti" OWNER TO "fleeti-service";'
+    '';
+
     systemd.services.fleeti = {
       description = "Fleeti Service";
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
         "postgresql.service"
+        "postgresql-setup.service"
       ];
-      requires = [ "postgresql.service" ];
+      requires = [
+        "postgresql.service"
+        "postgresql-setup.service"
+      ];
       path = [
         pkgs.git
         pkgs.nix

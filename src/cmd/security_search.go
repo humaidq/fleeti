@@ -155,8 +155,18 @@ func runSecuritySearch(ctx context.Context, cmd *cli.Command) error {
 	options.SaveRawResponses = cmd.Bool("save-raw-responses")
 	profile := routes.DefaultProfileSecuritySearchBaseProfile()
 
+	fmt.Println("Starting security search")
+	lastProgressMessage := ""
 	startedAt := time.Now().UTC()
-	result, runErr := ai.RunProfileSecuritySearch(ctx, profile, options, nil)
+	result, runErr := ai.RunProfileSecuritySearch(ctx, profile, options, func(progress routes.ProfileSecuritySearchProgress) {
+		message := nextSecuritySearchProgressMessage(lastProgressMessage, progress.ProgressMessage)
+		if message == "" {
+			return
+		}
+
+		fmt.Println(message)
+		lastProgressMessage = message
+	})
 	duration := time.Since(startedAt)
 
 	artifact := buildSecuritySearchRunArtifact(startedAt, duration, profile, options, result, runErr, strings.TrimSpace(cmd.String("label")))
@@ -174,6 +184,21 @@ func runSecuritySearch(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return nil
+}
+
+func nextSecuritySearchProgressMessage(lastPrinted, progressMessage string) string {
+	progressMessage = strings.TrimSpace(progressMessage)
+	if progressMessage == "" || progressMessage == lastPrinted {
+		return ""
+	}
+
+	if strings.HasPrefix(progressMessage, "Preparing security search") ||
+		strings.HasPrefix(progressMessage, "Generating candidate batch ") ||
+		strings.HasPrefix(progressMessage, "Evaluated ") {
+		return progressMessage
+	}
+
+	return ""
 }
 
 func buildSecuritySearchRunArtifact(startedAt time.Time, duration time.Duration, profile routes.ProfileSecuritySearchBaseProfile, options routes.ProfileSecuritySearchRunOptions, result routes.ProfileSecuritySearchRunResult, runErr error, label string) securitySearchRunArtifact {

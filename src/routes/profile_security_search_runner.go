@@ -12,6 +12,7 @@ import (
 
 type ProfileSecuritySearchScenario = profileSecuritySearchScenarioView
 type ProfileSecuritySearchCandidate = profileSecuritySearchCandidateView
+type ProfileSecuritySearchProgress = profileSecuritySearchProgress
 
 type ProfileSecuritySearchBaseProfile struct {
 	ID                  string   `json:"id,omitempty"`
