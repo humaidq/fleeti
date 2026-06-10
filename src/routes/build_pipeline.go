@@ -760,12 +760,20 @@ func buildKernelOverridesBlock(workspaceNixOSDir string, kernelConfig ProfileKer
 				url = "%s";
 				rev = "%s";
 %s			};%s
+			kernelMakefile = builtins.readFile "${sourceOverride}/Makefile";
+			kernelField = name:
+				let
+					prefix = name + " = ";
+					matched = builtins.filter (line: prev.lib.hasPrefix prefix line)
+						(prev.lib.splitString "\n" kernelMakefile);
+				in if matched == [] then "" else prev.lib.removePrefix prefix (builtins.head matched);
+			overrideVersion = "${kernelField "VERSION"}.${kernelField "PATCHLEVEL"}.${kernelField "SUBLEVEL"}${kernelField "EXTRAVERSION"}";
 		in
 		baseKernel.override {
 			argsOverride = {
 				src = %s;
-				version = baseKernel.version;
-				modDirVersion = baseKernel.modDirVersion;
+				version = overrideVersion;
+				modDirVersion = overrideVersion;
 				ignoreConfigErrors = true;
 			};
 		};
