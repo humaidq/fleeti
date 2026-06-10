@@ -29,7 +29,8 @@ import (
 )
 
 const (
-	kernelOptionsCommandTimeout  = 20 * time.Second
+	kernelOptionsCommandTimeout  = 120 * time.Second
+	kernelOptionsRetryCooldown   = 60 * time.Second
 	kernelOptionsFlakeRef        = "github:humaidq/fleeti#nixosConfigurations.fleeti.pkgs.linuxKernel.kernels"
 	profileKernelPatchFileField  = "kernel_patch_files"
 	maxKernelPatchCount          = 32
@@ -44,10 +45,12 @@ var errKernelOptionsCacheNotInitialized = errors.New("kernel options cache is no
 
 var (
 	kernelOptionsCacheMu          sync.RWMutex
-	kernelOptionsCacheInitOnce    sync.Once
 	kernelOptionsCacheInitialized bool
 	kernelOptionsCache            []KernelOption
 	kernelOptionsCacheErr         error
+
+	kernelOptionsLoadMu      sync.Mutex // single-flight guard for queries
+	kernelOptionsLastAttempt time.Time
 )
 
 type ProfileKernelPatch struct {
@@ -79,44 +82,74 @@ type kernelOptionJSON struct {
 	Version string `json:"version"`
 }
 
-// InitializeKernelOptionsCache loads kernel options once and stores them in-memory.
+// InitializeKernelOptionsCache warms the in-memory kernel options cache at startup.
+// It is non-fatal: a failure here is retried on demand by listAvailableKernelOptions.
 func InitializeKernelOptionsCache(ctx context.Context) error {
-	kernelOptionsCacheInitOnce.Do(func() {
-		options, err := queryAvailableKernelOptions(ctx)
-
-		kernelOptionsCacheMu.Lock()
-		kernelOptionsCache = cloneKernelOptions(options)
-		kernelOptionsCacheErr = err
-		kernelOptionsCacheInitialized = true
-		kernelOptionsCacheMu.Unlock()
-	})
-
-	kernelOptionsCacheMu.RLock()
-	defer kernelOptionsCacheMu.RUnlock()
-
-	if !kernelOptionsCacheInitialized {
-		return errKernelOptionsCacheNotInitialized
-	}
-
-	return kernelOptionsCacheErr
+	_, err := refreshKernelOptionsCache(ctx)
+	return err
 }
 
-func listAvailableKernelOptions(_ context.Context) ([]KernelOption, error) {
+func listAvailableKernelOptions(ctx context.Context) ([]KernelOption, error) {
 	kernelOptionsCacheMu.RLock()
-	initialized := kernelOptionsCacheInitialized
+	haveSuccess := kernelOptionsCacheInitialized && kernelOptionsCacheErr == nil
 	options := cloneKernelOptions(kernelOptionsCache)
-	err := kernelOptionsCacheErr
 	kernelOptionsCacheMu.RUnlock()
 
-	if !initialized {
+	if haveSuccess {
+		return options, nil
+	}
+
+	return refreshKernelOptionsCache(ctx)
+}
+
+// refreshKernelOptionsCache returns the cached options when a previous query
+// succeeded, otherwise it re-queries Nix. A successful result is cached for the
+// life of the process; a failure is retried on the next call once the cooldown
+// elapses, so a transient or slow first query no longer breaks the page until a
+// restart. A single-flight mutex ensures only one nix eval runs at a time.
+func refreshKernelOptionsCache(ctx context.Context) ([]KernelOption, error) {
+	kernelOptionsLoadMu.Lock()
+	defer kernelOptionsLoadMu.Unlock()
+
+	// A peer may have populated the cache while we waited for the lock.
+	kernelOptionsCacheMu.RLock()
+	haveSuccess := kernelOptionsCacheInitialized && kernelOptionsCacheErr == nil
+	cached := cloneKernelOptions(kernelOptionsCache)
+	cachedErr := kernelOptionsCacheErr
+	lastAttempt := kernelOptionsLastAttempt
+	kernelOptionsCacheMu.RUnlock()
+
+	if haveSuccess {
+		return cached, nil
+	}
+
+	// Respect a cooldown so repeated failures don't spawn a nix eval per request.
+	if !lastAttempt.IsZero() && time.Since(lastAttempt) < kernelOptionsRetryCooldown {
+		if cachedErr != nil {
+			return nil, cachedErr
+		}
+
 		return nil, errKernelOptionsCacheNotInitialized
 	}
+
+	options, err := queryAvailableKernelOptions(ctx)
+
+	kernelOptionsCacheMu.Lock()
+	kernelOptionsLastAttempt = time.Now()
+	kernelOptionsCacheInitialized = true
+	if err == nil {
+		kernelOptionsCache = cloneKernelOptions(options)
+		kernelOptionsCacheErr = nil
+	} else {
+		kernelOptionsCacheErr = err
+	}
+	kernelOptionsCacheMu.Unlock()
 
 	if err != nil {
 		return nil, err
 	}
 
-	return options, nil
+	return cloneKernelOptions(options), nil
 }
 
 func cloneKernelOptions(options []KernelOption) []KernelOption {
