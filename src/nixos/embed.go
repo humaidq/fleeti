@@ -8,5 +8,5 @@ import "embed"
 
 // Workspace contains embedded NixOS workspace files used for builds.
 //
-//go:embed flake.nix flake.lock flake-module.nix fleeti-installer.nix fleeti-installer.sh mk-fleeti-installer.nix run-image.nix modules/*.nix modules/*.png
+//go:embed flake.nix flake.lock flake-module.nix fleeti-installer.nix fleeti-installer.sh mk-fleeti-installer.nix run-image.nix modules/*.nix modules/*.png packages/*.nix packages/*.py
 var Workspace embed.FS
