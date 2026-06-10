@@ -769,18 +769,14 @@ func buildKernelOverridesBlock(workspaceNixOSDir string, kernelConfig ProfileKer
 				in if matched == [] then "" else prev.lib.removePrefix prefix (builtins.head matched);
 			overrideVersion = "${kernelField "VERSION"}.${kernelField "PATCHLEVEL"}.${kernelField "SUBLEVEL"}${kernelField "EXTRAVERSION"}";
 		in
-		(baseKernel.override {
+		baseKernel.override {
 			argsOverride = {
 				src = %s;
 				version = overrideVersion;
 				modDirVersion = overrideVersion;
 				ignoreConfigErrors = true;
 			};
-		}).overrideAttrs (old: {
-			# Building an older source tree with a newer toolchain emits warnings that
-			# CONFIG_WERROR=y turns fatal; demote them so the override source compiles.
-			makeFlags = (old.makeFlags or [ ]) ++ [ "KCFLAGS=-Wno-error" ];
-		});
+		};
 
 		fleetiKernelPackages = final.linuxPackagesFor final.fleetiKernel;
 	})
