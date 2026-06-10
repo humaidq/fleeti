@@ -766,6 +766,7 @@ func buildKernelOverridesBlock(workspaceNixOSDir string, kernelConfig ProfileKer
 				src = %s;
 				version = baseKernel.version;
 				modDirVersion = baseKernel.modDirVersion;
+				ignoreConfigErrors = true;
 			};
 		};
 
