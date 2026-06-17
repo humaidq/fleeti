@@ -3,12 +3,12 @@
 { self, ... }:
 let
   buildCommit =
-    self.shortRev or (if self ? rev then
-      builtins.substring 0 7 self.rev
-    else self.dirtyShortRev or (if self ? dirtyRev then
-      builtins.substring 0 7 self.dirtyRev
-    else
-      "unknown"));
+    self.shortRev or (
+      if self ? rev then
+        builtins.substring 0 7 self.rev
+      else
+        self.dirtyShortRev or (if self ? dirtyRev then builtins.substring 0 7 self.dirtyRev else "unknown")
+    );
 in
 {
   perSystem =

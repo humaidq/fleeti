@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026 Humaid Alqasimi
+# SPDX-License-Identifier: Apache-2.0
 
 import json
 import os
@@ -17,6 +19,7 @@ SYSTEMD_SYSUPDATE = os.environ.get("FLEETI_SYSTEMD_SYSUPDATE", "systemd-sysupdat
 SYSTEMCTL = os.environ.get("FLEETI_SYSTEMCTL", "systemctl")
 SUDO = os.environ.get("FLEETI_SUDO", "sudo")
 OS_RELEASE_PATH = "/etc/os-release"
+AGENT_STATUS_PATH = os.environ.get("FLEETI_ADMIND_STATUS", "/run/fleeti/admind/status.json")
 
 
 def run_command(args):
@@ -67,6 +70,19 @@ def read_os_release_field(name):
         return None
 
     return None
+
+
+def read_agent_status():
+    try:
+        with open(AGENT_STATUS_PATH, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    return payload
 
 
 def is_sysupdate_status_output(stderr):
@@ -159,15 +175,39 @@ def parse_release_details(output, fallback_version):
     return details
 
 
-class FleetiUpdaterWindow(Gtk.ApplicationWindow):
+class FleetiAdminWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Fleeti Updater")
-        self.set_default_size(560, 360)
+        super().__init__(application=app, title="Fleeti Admin")
+        self.set_default_size(620, 460)
 
         self.available_version = None
         self.pending_update = False
         self.system_version = read_os_release_field("IMAGE_VERSION") or "unknown"
 
+        stack = Gtk.Stack()
+        stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+
+        switcher = Gtk.StackSwitcher()
+        switcher.set_stack(stack)
+
+        header = Gtk.HeaderBar()
+        header.set_title_widget(switcher)
+        self.set_titlebar(header)
+
+        stack.add_titled(self.build_updater_page(), "updater", "Updater")
+        stack.add_titled(self.build_provision_page(), "provision", "Provision")
+        self.set_child(stack)
+
+        # Updater page initial state.
+        self.set_busy(None)
+        self.show_idle()
+        self.check_pending_update(is_startup=True)
+
+        # Provision page polls the agent status file.
+        self.refresh_provision()
+        GLib.timeout_add_seconds(3, self.refresh_provision)
+
+    def build_updater_page(self):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         root.set_margin_top(24)
         root.set_margin_bottom(24)
@@ -175,7 +215,7 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         root.set_margin_end(24)
 
         title = Gtk.Label()
-        title.set_markup("<span size='x-large' weight='bold'>Fleeti Updater</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Software Updates</span>")
         title.set_xalign(0)
         root.append(title)
 
@@ -262,11 +302,101 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         self.actions.append(self.reboot_button)
 
         root.append(self.actions)
-        self.set_child(root)
 
-        self.set_busy(None)
-        self.show_idle()
-        self.check_pending_update(is_startup=True)
+        return root
+
+    def build_provision_page(self):
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        root.set_margin_top(24)
+        root.set_margin_bottom(24)
+        root.set_margin_start(24)
+        root.set_margin_end(24)
+
+        title = Gtk.Label()
+        title.set_markup("<span size='x-large' weight='bold'>Provision Device</span>")
+        title.set_xalign(0)
+        root.append(title)
+
+        description = Gtk.Label(
+            label=(
+                "Pair this device with your Fleeti instance so it can be managed and "
+                "kept up to date. Enter the code below on the Fleeti web app."
+            )
+        )
+        description.set_wrap(True)
+        description.set_xalign(0)
+        root.append(description)
+
+        self.provision_code_label = Gtk.Label()
+        self.provision_code_label.set_xalign(0)
+        self.provision_code_label.set_selectable(True)
+        root.append(self.provision_code_label)
+
+        self.provision_status_label = Gtk.Label()
+        self.provision_status_label.set_wrap(True)
+        self.provision_status_label.set_xalign(0)
+        root.append(self.provision_status_label)
+
+        self.provision_instructions_label = Gtk.Label()
+        self.provision_instructions_label.set_wrap(True)
+        self.provision_instructions_label.set_xalign(0)
+        root.append(self.provision_instructions_label)
+
+        return root
+
+    def refresh_provision(self):
+        status = read_agent_status()
+
+        if status is None:
+            self.set_provision_code(None)
+            self.provision_status_label.set_text("Starting the device agent...")
+            self.provision_instructions_label.set_visible(False)
+            return True
+
+        if status.get("disabled"):
+            self.set_provision_code(None)
+            self.provision_status_label.set_text(
+                "Device management is not configured for this image."
+            )
+            self.provision_instructions_label.set_visible(False)
+            return True
+
+        if status.get("paired"):
+            self.set_provision_code(None)
+            hostname = status.get("hostname") or "this device"
+            self.provision_status_label.set_markup(
+                f"<span weight='bold'>This device is paired.</span>\nManaged as {GLib.markup_escape_text(hostname)}."
+            )
+            self.provision_instructions_label.set_visible(False)
+            return True
+
+        code = status.get("code") or ""
+        if code:
+            self.set_provision_code(code)
+            self.provision_status_label.set_text(
+                "Waiting for an administrator to claim this device."
+            )
+            self.provision_instructions_label.set_text(
+                "In Fleeti, open Devices, choose Pair Device, and enter this code."
+            )
+            self.provision_instructions_label.set_visible(True)
+        else:
+            self.set_provision_code(None)
+            self.provision_status_label.set_text("Generating a pairing code...")
+            self.provision_instructions_label.set_visible(False)
+
+        return True
+
+    def set_provision_code(self, code):
+        if code:
+            escaped = GLib.markup_escape_text(code)
+            self.provision_code_label.set_markup(
+                f"<span size='25000' weight='bold' letter_spacing='4000'>{escaped}</span>"
+            )
+            self.provision_code_label.set_visible(True)
+        else:
+            self.provision_code_label.set_text("")
+            self.provision_code_label.set_visible(False)
 
     def set_busy(self, message):
         is_busy = bool(message)
@@ -574,22 +704,22 @@ class FleetiUpdaterWindow(Gtk.ApplicationWindow):
         return False
 
 
-class FleetiUpdaterApplication(Gtk.Application):
+class FleetiAdminApplication(Gtk.Application):
     def __init__(self):
         super().__init__(
-            application_id="ae.fleeti.Updater",
+            application_id="ae.fleeti.Admin",
             flags=Gio.ApplicationFlags.DEFAULT_FLAGS,
         )
 
     def do_activate(self):
         window = self.props.active_window
         if window is None:
-            window = FleetiUpdaterWindow(self)
+            window = FleetiAdminWindow(self)
         window.present()
 
 
 def main():
-    app = FleetiUpdaterApplication()
+    app = FleetiAdminApplication()
     return app.run(None)
 
 

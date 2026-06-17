@@ -10,7 +10,8 @@ let
   hostName = "fleeti";
   hostSystem = "x86_64-linux";
   openclawHostName = "${hostName}-openclaw";
-  mkHostConfiguration = extraModules:
+  mkHostConfiguration =
+    extraModules:
     inputs.nixpkgs.lib.nixosSystem {
       system = hostSystem;
       specialArgs = {
@@ -19,7 +20,8 @@ let
       modules = [
         ./modules/default.nix
         { nixpkgs.hostPlatform = hostSystem; }
-      ] ++ extraModules;
+      ]
+      ++ extraModules;
     };
   hostConfiguration = config.flake.nixosConfigurations.${hostName}.config;
   openclawHostConfiguration = config.flake.nixosConfigurations.${openclawHostName}.config;
@@ -55,9 +57,10 @@ in
       ...
     }:
     let
-      fleetiUpdaterPackage = pkgs.callPackage ./packages/fleeti-updater.nix {
+      fleetiAdminPackage = pkgs.callPackage ./packages/fleeti-admin.nix {
         sudoPath = "${hostConfiguration.security.wrapperDir}/sudo";
       };
+      fleetiAdmindPackage = pkgs.callPackage ./packages/fleeti-admind.nix { };
       molthousedPackage = pkgs.callPackage ./packages/molthoused.nix { };
       molthousectlPackage = pkgs.callPackage ./packages/molthousectl.nix { };
       molthouseManagerPackage = pkgs.callPackage ./packages/molthouse-manager.nix { };
@@ -72,8 +75,10 @@ in
         # Test-only OpenClaw build outputs.
         "${openclawHostName}-image" = openclawHostConfiguration.system.build.image;
         "${openclawHostName}-update" = openclawHostConfiguration.system.build.sysupdate-package;
-        "${openclawHostName}-runner" = openclawHostConfiguration.microvm.vms.openclaw.config.config.microvm.declaredRunner;
-        fleeti-updater = fleetiUpdaterPackage;
+        "${openclawHostName}-runner" =
+          openclawHostConfiguration.microvm.vms.openclaw.config.config.microvm.declaredRunner;
+        fleeti-admin = fleetiAdminPackage;
+        fleeti-admind = fleetiAdmindPackage;
         molthoused = molthousedPackage;
         molthousectl = molthousectlPackage;
         molthouse-manager = molthouseManagerPackage;

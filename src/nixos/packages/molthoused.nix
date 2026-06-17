@@ -68,5 +68,5 @@ symlinkJoin {
     dbusPolicy
   ];
 
-  meta = launcher.meta;
+  inherit (launcher) meta;
 }

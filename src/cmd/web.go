@@ -183,6 +183,20 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Patch("/profiles/{id}", routes.APIPatchProfile)
 	}, routes.RequireAPIUser())
 
+	// Unauthenticated device bootstrap endpoints: a pending enrollment grants
+	// nothing until an administrator claims its code.
+	f.Group("/api/v1/device", func() {
+		f.Post("/enroll/start", routes.AgentEnrollStart)
+		f.Post("/enroll/poll", routes.AgentEnrollPoll)
+	})
+
+	// Device-token authenticated agent endpoints.
+	f.Group("/api/v1/device", func() {
+		f.Post("/telemetry", routes.AgentTelemetry)
+		f.Get("/commands", routes.AgentCommands)
+		f.Post("/commands/{id}/result", routes.AgentCommandResult)
+	}, routes.RequireDeviceAuth())
+
 	f.Get("/login", routes.LoginForm)
 	f.Get("/setup", routes.SetupForm)
 	f.Post("/webauthn/login/start", csrf.Validate, routes.PasskeyLoginStart)
@@ -285,6 +299,9 @@ func start(ctx context.Context, cmd *cli.Command) error {
 
 		f.Get("/devices", routes.DevicesPage)
 		f.Post("/devices", csrf.Validate, routes.CreateDevice)
+		f.Post("/devices/pair", csrf.Validate, routes.PairDevice)
+		f.Get("/devices/{id}", routes.DeviceDetailPage)
+		f.Post("/devices/{id}/edit", csrf.Validate, routes.UpdateDevice)
 
 		f.Get("/rollouts", routes.RolloutsPage)
 		f.Post("/rollouts", csrf.Validate, routes.CreateRollout)

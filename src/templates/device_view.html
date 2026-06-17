@@ -1,0 +1,164 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+<div class="page-header">
+  <h2>{{ .Device.Hostname }}</h2>
+  <div class="page-header-actions">
+    <a href="/devices" class="btn">Back to Devices</a>
+  </div>
+</div>
+
+<section class="section-card">
+  <h3>Overview</h3>
+  <div class="table-card">
+    <table class="contacts-list responsive-stack-table">
+      <tbody>
+        <tr>
+          <td data-label="Status">Pairing</td>
+          <td>
+            {{ if .Device.Paired }}
+            <span class="status-badge status-healthy">Paired</span>
+            {{ else }}
+            <span class="status-badge status-idle">Unpaired</span>
+            {{ end }}
+          </td>
+        </tr>
+        <tr>
+          <td data-label="Fleet">Fleet</td>
+          <td><a href="/fleets/{{ .Device.FleetID }}">{{ .Device.FleetName }}</a></td>
+        </tr>
+        <tr>
+          <td data-label="Machine ID">Machine ID</td>
+          <td>{{ if .Device.MachineID }}<code>{{ .Device.MachineID }}</code>{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Attestation">Attestation</td>
+          <td><span class="muted-text">{{ .Device.AttestationLevel }}</span></td>
+        </tr>
+        <tr>
+          <td data-label="Added (UTC)">Added (UTC)</td>
+          <td>{{ .Device.CreatedAt }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section-card">
+  <h3>Status &amp; Telemetry</h3>
+  <div class="table-card">
+    <table class="contacts-list responsive-stack-table">
+      <tbody>
+        <tr>
+          <td data-label="Update State">Update state</td>
+          <td><span class="status-badge status-{{ .Device.UpdateState }}">{{ .Device.UpdateState }}</span></td>
+        </tr>
+        <tr>
+          <td data-label="Reported Version">Fleeti version (reported)</td>
+          <td>{{ if .Device.ReportedVersion }}{{ .Device.ReportedVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Agent Version">Agent version</td>
+          <td>{{ if .Device.AgentVersion }}{{ .Device.AgentVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Current Release">Current release</td>
+          <td>{{ if .Device.CurrentReleaseVersion }}{{ .Device.CurrentReleaseVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Desired Release">Desired release</td>
+          <td>{{ if .Device.DesiredReleaseVersion }}{{ .Device.DesiredReleaseVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Last Seen (UTC)">Last seen (UTC)</td>
+          <td>{{ if .Device.LastSeenAt }}{{ .Device.LastSeenAt }}{{ else }}<span class="muted-text">never</span>{{ end }}</td>
+        </tr>
+        <tr>
+          <td data-label="Last Telemetry (UTC)">Last telemetry (UTC)</td>
+          <td>{{ if .Device.LastTelemetryAt }}{{ .Device.LastTelemetryAt }}{{ else }}<span class="muted-text">never</span>{{ end }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section-card">
+  <h3>Edit Device</h3>
+  <details class="add-item-details">
+    <summary class="add-item-summary">+ Edit Device</summary>
+    <form method="post" action="/devices/{{ .Device.ID }}/edit" class="add-item-form">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <div class="add-item-field">
+        <label for="edit-hostname">Hostname</label>
+        <input id="edit-hostname" name="hostname" class="form-item" value="{{ .Device.Hostname }}" required />
+      </div>
+      <div class="add-item-field">
+        <label for="edit-serial">Serial Number</label>
+        <input id="edit-serial" name="serial_number" class="form-item" value="{{ .Device.SerialNumber }}" required />
+      </div>
+      <button type="submit" class="btn">Save Changes</button>
+    </form>
+  </details>
+</section>
+
+{{ if .CommandsEnabled }}
+<section class="section-card">
+  <h3>Remote Actions</h3>
+  <div class="page-header-actions">
+    <form method="post" action="/devices/{{ .Device.ID }}/force-update" class="inline-form"
+      onsubmit="return confirm('Force this device to update and reboot?');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn">Force Update &amp; Reboot</button>
+    </form>
+    <form method="post" action="/devices/{{ .Device.ID }}/reboot" class="inline-form"
+      onsubmit="return confirm('Reboot this device now?');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn">Reboot</button>
+    </form>
+  </div>
+</section>
+{{ end }}
+
+<section class="section-card">
+  <h3>Telemetry History</h3>
+  {{ if .Telemetry }}
+  <div class="table-card">
+    <table class="contacts-list responsive-stack-table">
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Reported Version</th>
+          <th>State</th>
+          <th>Payload</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{ range .Telemetry }}
+        <tr>
+          <td data-label="Time (UTC)">{{ .CreatedAt }}</td>
+          <td data-label="Reported Version">{{ if .ReportedVersion }}{{ .ReportedVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+          <td data-label="State">{{ if .UpdateState }}<span class="status-badge status-{{ .UpdateState }}">{{ .UpdateState }}</span>{{ else }}<span class="muted-text">-</span>{{ end }}</td>
+          <td data-label="Payload"><details><summary>view</summary><pre>{{ .PayloadJSON }}</pre></details></td>
+        </tr>
+      {{ end }}
+      </tbody>
+    </table>
+  </div>
+  {{ else }}
+  <p class="muted-text">No telemetry received yet.</p>
+  {{ end }}
+</section>
+
+{{ template "foot" . }}

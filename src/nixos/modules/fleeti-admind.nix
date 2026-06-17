@@ -1,0 +1,76 @@
+# Copyright 2026 Humaid Alqasimi
+# SPDX-License-Identifier: Apache-2.0
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
+let
+  cfg = config.fleeti.services.admind;
+  agentPackage = pkgs.callPackage ../packages/fleeti-admind.nix { };
+  stateDir = "/var/lib/fleeti/admind";
+  runtimeDir = "/run/fleeti/admind";
+in
+{
+  options.fleeti.services.admind = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run the Fleeti device management agent.";
+    };
+
+    fleetId = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "Fleet UUID baked into the image at build time. Empty disables the agent.";
+    };
+
+    serverUrl = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = "Fleeti instance base URL the agent reports to. Empty disables the agent.";
+    };
+
+    telemetryIntervalSeconds = lib.mkOption {
+      type = lib.types.int;
+      default = 60;
+      description = "How often the agent reports telemetry, in seconds.";
+    };
+  };
+
+  config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ agentPackage ];
+
+    systemd.services.fleeti-admind = {
+      description = "Fleeti device management agent";
+      wantedBy = [ "multi-user.target" ];
+      wants = [ "network.target" ];
+      after = [ "network.target" ];
+
+      environment = {
+        FLEETI_ADMIND_FLEET_ID = cfg.fleetId;
+        FLEETI_ADMIND_SERVER_URL = cfg.serverUrl;
+        FLEETI_ADMIND_STATE_DIR = stateDir;
+        FLEETI_ADMIND_RUNTIME_DIR = runtimeDir;
+        FLEETI_ADMIND_TELEMETRY_INTERVAL = toString cfg.telemetryIntervalSeconds;
+        FLEETI_SYSTEMD_SYSUPDATE = "${pkgs.systemd}/lib/systemd/systemd-sysupdate";
+        FLEETI_SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
+      };
+
+      serviceConfig = {
+        ExecStart = "${agentPackage}/bin/fleeti-admind serve";
+        Restart = "on-failure";
+        RestartSec = "10s";
+
+        # systemd creates and owns these; RuntimeDirectory is world-readable so the
+        # Fleeti Admin GUI (running as the fleeti user) can read status.json.
+        StateDirectory = "fleeti/admind";
+        StateDirectoryMode = "0700";
+        RuntimeDirectory = "fleeti/admind";
+        RuntimeDirectoryMode = "0755";
+        RuntimeDirectoryPreserve = "yes";
+      };
+    };
+  };
+}

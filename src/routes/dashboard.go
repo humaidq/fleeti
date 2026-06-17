@@ -3000,6 +3000,106 @@ func CreateDevice(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/devices", FlashSuccess, "Device created")
 }
 
+// DeviceDetailPage renders a single device with its status and telemetry history.
+func DeviceDetailPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Device")
+	data["IsDevices"] = true
+
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
+
+		return
+	}
+
+	device, err := db.GetDeviceByID(c.Request().Context(), deviceID)
+	if err != nil {
+		handleMutationError(c, s, "/devices", err)
+
+		return
+	}
+
+	telemetry, err := db.ListDeviceTelemetry(c.Request().Context(), device.ID, 50)
+	if err != nil {
+		logger.Error("failed to load device telemetry", "device_id", device.ID, "error", err)
+		setPageErrorFlash(data, "Failed to load device telemetry")
+
+		telemetry = []db.DeviceTelemetryRecord{}
+	}
+
+	data["Device"] = device
+	data["Telemetry"] = telemetry
+	// CommandsEnabled gates the future force-update / reboot actions in the template.
+	data["CommandsEnabled"] = false
+	setBreadcrumbs(data, []BreadcrumbItem{
+		{Name: "Devices", URL: "/devices"},
+		{Name: device.Hostname, IsCurrent: true},
+	})
+
+	t.HTML(http.StatusOK, "device_view")
+}
+
+// UpdateDevice updates admin-editable device fields (e.g. serial number).
+func UpdateDevice(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
+
+		return
+	}
+
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, "/devices/"+deviceID, FlashError, "Failed to parse form")
+
+		return
+	}
+
+	input := db.UpdateDeviceInput{
+		Hostname:     strings.TrimSpace(c.Request().Form.Get("hostname")),
+		SerialNumber: strings.TrimSpace(c.Request().Form.Get("serial_number")),
+	}
+
+	if err := db.UpdateDevice(c.Request().Context(), deviceID, input); err != nil {
+		handleMutationError(c, s, "/devices/"+deviceID, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Device updated")
+}
+
+// PairDevice claims a pairing code, auto-derives its fleet, and adds the device.
+func PairDevice(c flamego.Context, s session.Session) {
+	if err := c.Request().ParseForm(); err != nil {
+		redirectWithMessage(c, s, "/devices", FlashError, "Failed to parse form")
+
+		return
+	}
+
+	code := strings.TrimSpace(c.Request().Form.Get("code"))
+	if code == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Pairing code is required")
+
+		return
+	}
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
+
+		return
+	}
+
+	deviceID, err := db.ClaimEnrollmentCode(c.Request().Context(), code, user.ID.String())
+	if err != nil {
+		handleMutationError(c, s, "/devices", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Device paired")
+}
+
 // RolloutsPage renders rollouts list and create form.
 func RolloutsPage(c flamego.Context, t template.Template, data template.Data) {
 	setPage(data, "Rollouts")
@@ -4076,6 +4176,16 @@ func mutationErrorMessage(err error) string {
 		return "Hostname already exists in this fleet"
 	case errors.Is(err, db.ErrDeviceSerialAlreadyExists):
 		return "Serial number already exists"
+	case errors.Is(err, db.ErrDeviceNotFound):
+		return "Device not found"
+	case errors.Is(err, db.ErrEnrollmentCodeRequired):
+		return "Pairing code is required"
+	case errors.Is(err, db.ErrEnrollmentNotFound):
+		return "Pairing code not found"
+	case errors.Is(err, db.ErrEnrollmentExpired):
+		return "Pairing code has expired"
+	case errors.Is(err, db.ErrEnrollmentAlreadyClaimed):
+		return "Pairing code was already used"
 	case errors.Is(err, db.ErrRolloutNotFound):
 		return "Rollout not found"
 	case errors.Is(err, db.ErrRolloutFleetReleaseMismatch):

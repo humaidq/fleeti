@@ -638,6 +638,9 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 
 	system.image.version = "%s";
 
+	fleeti.services.admind.fleetId = "%s";
+	fleeti.services.admind.serverUrl = "%s";
+
 	fleeti.services.openclawMicrovm.enable = lib.mkForce %s;
 
 	systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "%s";
@@ -650,7 +653,7 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 	environment.systemPackages = with pkgs; [
 %s  ];
 }
-`, escapeNixString(buildVersion), openclawMicroVMEnabledLiteral, escapeNixString(updateSourcePath), escapeNixString(updateSourcePath), kernelOverridesBlock, securityOverridesBlock, packageLines)
+`, escapeNixString(buildVersion), escapeNixString(fleetID), escapeNixString(instanceBaseURL), openclawMicroVMEnabledLiteral, escapeNixString(updateSourcePath), escapeNixString(updateSourcePath), kernelOverridesBlock, securityOverridesBlock, packageLines)
 
 	if err := os.WriteFile(overridesModulePath, []byte(overridesModuleBody), 0o640); err != nil {
 		return fmt.Errorf("failed to write build overrides module: %w", err)

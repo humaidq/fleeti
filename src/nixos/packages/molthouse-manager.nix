@@ -61,7 +61,12 @@ let
 
     preFixup = ''
       makeWrapperArgs+=("''${gappsWrapperArgs[@]}")
-      makeWrapperArgs+=(--prefix PATH : ${lib.makeBinPath [ foot molthousectlPackage ]})
+      makeWrapperArgs+=(--prefix PATH : ${
+        lib.makeBinPath [
+          foot
+          molthousectlPackage
+        ]
+      })
     '';
 
     installPhase = ''
@@ -85,5 +90,5 @@ symlinkJoin {
     desktopItem
   ];
 
-  meta = package.meta;
+  inherit (package) meta;
 }

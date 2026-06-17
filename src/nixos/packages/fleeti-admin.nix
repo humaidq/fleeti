@@ -17,20 +17,20 @@
 }:
 let
   desktopItem = makeDesktopItem {
-    name = "fleeti-updater";
-    desktopName = "Fleeti Updater";
-    comment = "Install Fleeti system updates";
-    exec = "fleeti-updater";
-    icon = "system-software-update";
+    name = "fleeti-admin";
+    desktopName = "Fleeti Admin";
+    comment = "Manage Fleeti updates and device provisioning";
+    exec = "fleeti-admin";
+    icon = "preferences-system";
     terminal = false;
     categories = [
       "System"
-      "Utility"
+      "Settings"
     ];
   };
 
   package = python3Packages.buildPythonApplication {
-    pname = "fleeti-updater";
+    pname = "fleeti-admin";
     version = "1.0.0";
 
     pyproject = false;
@@ -64,29 +64,30 @@ let
         "--set" "FLEETI_SUDO" "${sudoPath}"
         "--set" "FLEETI_SYSTEMD_SYSUPDATE" "${systemd}/lib/systemd/systemd-sysupdate"
         "--set" "FLEETI_SYSTEMCTL" "${systemd}/bin/systemctl"
+        "--set" "FLEETI_ADMIND_STATUS" "/run/fleeti/admind/status.json"
       )
     '';
 
     installPhase = ''
       runHook preInstall
-      install -Dm755 fleeti-updater.py $out/bin/fleeti-updater
-      patchShebangs $out/bin/fleeti-updater
+      install -Dm755 fleeti-admin.py $out/bin/fleeti-admin
+      patchShebangs $out/bin/fleeti-admin
       runHook postInstall
     '';
 
     meta = {
-      description = "GTK updater for Fleeti systemd-sysupdate releases";
-      mainProgram = "fleeti-updater";
+      description = "GTK admin app for Fleeti updates and device provisioning";
+      mainProgram = "fleeti-admin";
       platforms = lib.platforms.linux;
     };
   };
 in
 symlinkJoin {
-  name = "fleeti-updater";
+  name = "fleeti-admin";
   paths = [
     package
     desktopItem
   ];
 
-  meta = package.meta;
+  inherit (package) meta;
 }

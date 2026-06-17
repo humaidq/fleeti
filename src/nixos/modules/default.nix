@@ -10,7 +10,7 @@
 }:
 
 let
-  fleetiUpdaterPackage = pkgs.callPackage ../packages/fleeti-updater.nix {
+  fleetiAdminPackage = pkgs.callPackage ../packages/fleeti-admin.nix {
     sudoPath = "${config.security.wrapperDir}/sudo";
   };
 in
@@ -23,6 +23,7 @@ in
     ./overlays.nix
     ./build-overrides.nix
     ./openclaw-microvm.nix
+    ./fleeti-admind.nix
     ./update.nix
     ./update-package.nix
   ];
@@ -237,7 +238,7 @@ in
   };
 
   environment.systemPackages = with pkgs; [
-    fleetiUpdaterPackage
+    fleetiAdminPackage
     foot
     git
     sfwbar

@@ -16,7 +16,7 @@
         programs = {
           # Nix
           nixfmt.enable = true;
-          nixfmt.package = pkgs.nixfmt-rfc-style; # nix standard formatter according to rfc 166
+          nixfmt.package = pkgs.nixfmt; # nix standard formatter according to rfc 166
           deadnix.enable = true; # removes dead nix code https://github.com/astro/deadnix
           statix.enable = true; # prevents use of nix anti-patterns https://github.com/nerdypepper/statix
           # Bash

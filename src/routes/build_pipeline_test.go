@@ -372,6 +372,14 @@ func TestWriteBuildOverridesModuleUsesDefaultFleetiInstanceURL(t *testing.T) {
 	if !strings.Contains(generated, `systemd.sysupdate.transfers."20-boot-image".Source.Path = lib.mkForce "https://admin.fleeti.ae/update/fleet-a/";`) {
 		t.Fatalf("expected default Fleeti instance URL for boot image in generated overrides, got: %s", generated)
 	}
+
+	if !strings.Contains(generated, `fleeti.services.admind.fleetId = "fleet-a";`) {
+		t.Fatalf("expected admind fleetId in generated overrides, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `fleeti.services.admind.serverUrl = "https://admin.fleeti.ae";`) {
+		t.Fatalf("expected admind serverUrl in generated overrides, got: %s", generated)
+	}
 }
 
 func TestWriteBuildOverridesModuleUsesConfiguredFleetiInstanceURLPrefix(t *testing.T) {
@@ -397,6 +405,10 @@ func TestWriteBuildOverridesModuleUsesConfiguredFleetiInstanceURLPrefix(t *testi
 	if !strings.Contains(generated, expected) {
 		t.Fatalf("expected configured Fleeti instance URL with prefix in generated overrides, got: %s", generated)
 	}
+
+	if !strings.Contains(generated, `fleeti.services.admind.serverUrl = "https://192.168.1.123:8080/fleeti";`) {
+		t.Fatalf("expected admind serverUrl with prefix in generated overrides, got: %s", generated)
+	}
 }
 
 func TestWriteBuildOverridesModuleAllowsHTTPFleetiInstanceURL(t *testing.T) {
@@ -420,6 +432,10 @@ func TestWriteBuildOverridesModuleAllowsHTTPFleetiInstanceURL(t *testing.T) {
 	generated := string(content)
 	if !strings.Contains(generated, `systemd.sysupdate.transfers."10-nix-store".Source.Path = lib.mkForce "http://192.168.1.123:8080/update/fleet-a/";`) {
 		t.Fatalf("expected HTTP Fleeti instance URL in generated overrides, got: %s", generated)
+	}
+
+	if !strings.Contains(generated, `fleeti.services.admind.serverUrl = "http://192.168.1.123:8080";`) {
+		t.Fatalf("expected admind serverUrl over HTTP in generated overrides, got: %s", generated)
 	}
 }
 

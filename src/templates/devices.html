@@ -8,6 +8,24 @@
 </div>
 
 <section class="section-card">
+  <h3>Pair Device</h3>
+  <p class="muted-text">
+    Open the <strong>Provision</strong> page in Fleeti Admin on the device to get its pairing
+    code, then enter it below. The device's fleet is detected automatically.
+  </p>
+  <form method="post" action="/devices/pair" class="add-item-form">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <div class="add-item-field">
+      <label for="pair-code">Pairing Code</label>
+      <input id="pair-code" name="code" class="form-item" maxlength="12" required
+        autocomplete="off" autocapitalize="characters" spellcheck="false"
+        placeholder="e.g. 7K4PQ2" style="text-transform: uppercase;" />
+    </div>
+    <button type="submit" class="btn">Pair Device</button>
+  </form>
+</section>
+
+<section class="section-card">
   <h3>Create Device</h3>
   <details class="add-item-details">
     <summary class="add-item-summary">+ Create Device</summary>
@@ -70,7 +88,7 @@
       <tbody>
       {{ range .Devices }}
         <tr>
-          <td><strong>{{ .Hostname }}</strong></td>
+          <td><a href="/devices/{{ .ID }}"><strong>{{ .Hostname }}</strong></a></td>
           <td><code>{{ .SerialNumber }}</code></td>
           <td>{{ .FleetName }}</td>
           <td>
