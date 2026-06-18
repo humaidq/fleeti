@@ -87,6 +87,13 @@ in
           inherit (hostConfiguration.system.build) image;
           imageFile = "${hostConfiguration.system.image.id}_${hostConfiguration.system.image.version}.raw";
         };
+        # Like run-image, but signs the image with a throwaway key and boots it in
+        # a Secure Boot capable OVMF (setup mode) so enrollment can be tested.
+        run-image-signed = pkgs.callPackage ./run-image-signed.nix {
+          inherit (hostConfiguration.system.build) image;
+          imageFile = "${hostConfiguration.system.image.id}_${hostConfiguration.system.image.version}.raw";
+          OVMF = pkgs.OVMFFull;
+        };
         "${openclawHostName}-run-image" = pkgs.callPackage ./run-image.nix {
           inherit (openclawHostConfiguration.system.build) image;
           imageFile = openclawImageFile;
