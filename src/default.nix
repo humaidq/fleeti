@@ -26,8 +26,22 @@ pkgs.buildGoModule rec {
 
   nativeBuildInputs = [ pkgs.makeWrapper ];
 
+  # Tools the running service shells out to at runtime. Wrapping them onto the
+  # binary's PATH makes fleeti self-contained regardless of how it is launched
+  # (systemd service, `nix run`, etc.).
   postFixup = ''
     wrapProgram "$out/bin/fleeti" \
-      --prefix PATH : "${lib.makeBinPath [ pkgs.nix-search-cli ]}"
+      --prefix PATH : "${lib.makeBinPath [
+        pkgs.nix-search-cli
+        # Post-build Secure Boot signing (sign-secure-boot.sh runs outside Nix).
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.sbsigntool # sbsign, sbverify
+        pkgs.efitools # cert-to-efi-sig-list, sign-efi-sig-list
+        pkgs.mtools # mcopy, mdir, mmd
+        pkgs.util-linux # sfdisk
+        pkgs.jq
+        pkgs.xz
+      ]}"
   '';
 }

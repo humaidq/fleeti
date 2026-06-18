@@ -170,9 +170,26 @@ type Device struct {
 	CurrentReleaseVersion string
 	DesiredReleaseVersion string
 	UpdateState           string
-	AttestationLevel      string
+	SecureBootEnabled     bool
+	SetupMode             bool
+	Attested              bool
 	LastSeenAt            string
 	CreatedAt             string
+}
+
+// AttestationTier derives the device's attestation level from its Secure Boot
+// and attestation state. The "attested" (green) tier additionally requires a
+// passing TPM challenge, which is future work; until then `Attested` is never
+// set and the tier tops out at "secure-boot".
+func (d Device) AttestationTier() string {
+	switch {
+	case d.SecureBootEnabled && d.Attested:
+		return "attested"
+	case d.SecureBootEnabled:
+		return "secure-boot"
+	default:
+		return "none"
+	}
 }
 
 type Rollout struct {
@@ -1488,43 +1505,45 @@ func DeleteBuild(ctx context.Context, buildID string) error {
 	return nil
 }
 
-func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, string, error) {
+func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, string, string, error) {
 	p := GetPool()
 	if p == nil {
-		return "", "", "", ErrDatabaseConnectionNotInitialized
+		return "", "", "", "", ErrDatabaseConnectionNotInitialized
 	}
 
 	buildID = strings.TrimSpace(buildID)
 	if buildID == "" {
-		return "", "", "", ErrBuildRequired
+		return "", "", "", "", ErrBuildRequired
 	}
 
 	var configJSON string
 	var fleetID string
 	var rawNix string
+	var profileID string
 
 	err := p.QueryRow(ctx, `
 		SELECT
 			pr.config_json::text,
 			COALESCE(pr.raw_nix, ''),
-			COALESCE(b.fleet_id::text, '')
+			COALESCE(b.fleet_id::text, ''),
+			pr.profile_id::text
 		FROM builds b
 		JOIN profile_revisions pr ON pr.id = b.profile_revision_id
 		WHERE b.id::text = $1
-	`, buildID).Scan(&configJSON, &rawNix, &fleetID)
+	`, buildID).Scan(&configJSON, &rawNix, &fleetID, &profileID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", "", ErrBuildNotFound
+		return "", "", "", "", ErrBuildNotFound
 	}
 
 	if err != nil {
-		return "", "", "", fmt.Errorf("failed to load build profile execution metadata: %w", err)
+		return "", "", "", "", fmt.Errorf("failed to load build profile execution metadata: %w", err)
 	}
 
 	if fleetID == "" {
-		return "", "", "", ErrProfileFleetRequired
+		return "", "", "", "", ErrProfileFleetRequired
 	}
 
-	return configJSON, rawNix, fleetID, nil
+	return configJSON, rawNix, fleetID, profileID, nil
 }
 
 func CreateBuild(ctx context.Context, input CreateBuildInput) (string, error) {
@@ -2316,7 +2335,9 @@ func ListDevices(ctx context.Context) ([]Device, error) {
 			COALESCE(curr.version, ''),
 			COALESCE(des.version, ''),
 			d.update_state,
-			d.attestation_level,
+			d.secure_boot_enabled,
+			d.setup_mode,
+			d.attested,
 			COALESCE(to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
 			to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 		FROM devices d
@@ -2344,7 +2365,9 @@ func ListDevices(ctx context.Context) ([]Device, error) {
 			&item.CurrentReleaseVersion,
 			&item.DesiredReleaseVersion,
 			&item.UpdateState,
-			&item.AttestationLevel,
+			&item.SecureBootEnabled,
+			&item.SetupMode,
+			&item.Attested,
 			&item.LastSeenAt,
 			&item.CreatedAt,
 		); err != nil {

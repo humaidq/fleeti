@@ -38,6 +38,9 @@ const (
 	buildLogFlushSize            = 4096
 	updateBuildTarget            = ".#fleeti-update"
 	installerBuildTarget         = ".#fleeti-installer"
+	imageBuildTarget             = ".#fleeti-image"
+	installerImageDirName        = "installer-image"
+	installerImageFileName       = "image.raw"
 	defaultFleetiInstanceBaseURL = "https://admin.fleeti.ae"
 	fleetiInstanceBaseURLEnvVar  = "FLEETI_INSTANCE_BASE_URL"
 )
@@ -196,7 +199,7 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
-	profileConfigJSON, rawNix, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	profileConfigJSON, rawNix, fleetID, profileID, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
@@ -225,6 +228,11 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
 	}
 
+	material, err := ensureProfileSecureBootMaterial(profileID, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare secure boot key material: %w", err)
+	}
+
 	if err := writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, rawNix); err != nil {
 		return "", err
 	}
@@ -237,6 +245,14 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 	artifactURL, err := publishBuildArtifacts(resultDir, updatesDir, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to publish build artifacts: %w", err)
+	}
+
+	// Sign the published UKI(s) with the profile's Secure Boot key and refresh
+	// the checksum manifest. Signing happens on the writable published copy, never
+	// on the read-only Nix store output, and never inside the Nix build.
+	publishedBuildDir := filepath.Join(updatesDir, updatesArtifactsDirName, buildID)
+	if err := signUpdatePackageDir(ctx, buildID, signScriptPath(workspaceNixOSDir), material, publishedBuildDir); err != nil {
+		return "", err
 	}
 
 	return artifactURL, nil
@@ -257,7 +273,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", db.ErrBuildNotReadyForInstaller
 	}
 
-	profileConfigJSON, rawNix, fleetID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	profileConfigJSON, rawNix, fleetID, profileID, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
@@ -284,6 +300,11 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 
 	if err := validateProfileKernelConfig(kernelConfig, nil); err != nil {
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
+	}
+
+	material, err := ensureProfileSecureBootMaterial(profileID, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to prepare secure boot key material: %w", err)
 	}
 
 	updatesDir, err := resolveUpdatesDirectory()
@@ -311,6 +332,23 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", err
 	}
 
+	// Build the raw system image first, sign its ESP (EFI binaries + auto-enroll
+	// keys) outside Nix, then build the installer ISO which sources the signed
+	// image from the workspace (see mk-fleeti-installer.nix). This keeps the
+	// private key out of Nix while ensuring the flashed system is signed.
+	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, imageBuildTarget, true); err != nil {
+		return "", err
+	}
+
+	signedImagePath, err := stageInstallerImageForSigning(workspaceNixOSDir)
+	if err != nil {
+		return "", err
+	}
+
+	if err := signImageArtifact(ctx, buildID, signScriptPath(workspaceNixOSDir), material, signedImagePath); err != nil {
+		return "", err
+	}
+
 	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, installerBuildTarget, true); err != nil {
 		return "", err
 	}
@@ -322,6 +360,67 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 	}
 
 	return artifactURL, nil
+}
+
+// stageInstallerImageForSigning copies the freshly built combined raw disk image
+// out of the read-only Nix store result into a writable location inside the
+// workspace (installer-image/image.raw) so it can be signed in place and then
+// picked up by the installer ISO build.
+func stageInstallerImageForSigning(workspaceNixOSDir string) (string, error) {
+	resultDir := filepath.Join(workspaceNixOSDir, "result")
+
+	rawSourcePath, err := findCombinedImageRaw(resultDir)
+	if err != nil {
+		return "", err
+	}
+
+	installerImageDir := filepath.Join(workspaceNixOSDir, installerImageDirName)
+	if err := os.MkdirAll(installerImageDir, 0o750); err != nil {
+		return "", fmt.Errorf("failed to create installer image directory: %w", err)
+	}
+
+	destinationPath := filepath.Join(installerImageDir, installerImageFileName)
+	if err := copyFile(rawSourcePath, destinationPath, 0o644); err != nil {
+		return "", fmt.Errorf("failed to stage installer image for signing: %w", err)
+	}
+
+	return destinationPath, nil
+}
+
+// findCombinedImageRaw locates the combined raw disk image in a repart image
+// build output directory. The combined image ends with ".raw" but is not the
+// split ".nix-store.raw" partition artifact.
+func findCombinedImageRaw(resultDir string) (string, error) {
+	entries, err := os.ReadDir(resultDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image build result directory: %w", err)
+	}
+
+	matches := make([]string, 0, 1)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".raw") || strings.HasSuffix(name, ".nix-store.raw") {
+			continue
+		}
+
+		matches = append(matches, name)
+	}
+
+	if len(matches) == 0 {
+		return "", fmt.Errorf("image build produced no combined raw disk image")
+	}
+
+	if len(matches) > 1 {
+		sort.Strings(matches)
+
+		return "", fmt.Errorf("image build produced multiple combined raw disk images: %s", strings.Join(matches, ", "))
+	}
+
+	return filepath.Join(resultDir, matches[0]), nil
 }
 
 func populateNixOSWorkspace(destinationDir string) error {
@@ -488,7 +587,7 @@ func copyDirectoryWithFilters(sourceDir, destinationDir string) error {
 func shouldSkipWorkspaceEntry(relPath string, entry fs.DirEntry) bool {
 	base := filepath.Base(relPath)
 
-	if base == "result" || base == "demo-disk.raw" || base == "embed.go" {
+	if base == "result" || base == "demo-disk.raw" || base == "embed.go" || base == installerImageDirName {
 		return true
 	}
 

@@ -65,6 +65,8 @@ type agentTelemetryRequest struct {
 	CurrentVersion   string `json:"current_version"`
 	DesiredVersion   string `json:"desired_version"`
 	AvailableVersion string `json:"available_version"`
+	SecureBoot       bool   `json:"secure_boot"`
+	SetupMode        bool   `json:"setup_mode"`
 }
 
 type agentCommand struct {
@@ -181,12 +183,14 @@ func AgentTelemetry(c flamego.Context, device *db.Device) {
 	}
 
 	if err := db.RecordDeviceTelemetry(c.Request().Context(), db.TelemetryInput{
-		DeviceID:         device.ID,
-		ReportedVersion:  req.ReportedVersion,
-		AvailableVersion: req.AvailableVersion,
-		AgentVersion:     req.AgentVersion,
-		UpdateState:      req.UpdateState,
-		PayloadJSON:      string(body),
+		DeviceID:          device.ID,
+		ReportedVersion:   req.ReportedVersion,
+		AvailableVersion:  req.AvailableVersion,
+		AgentVersion:      req.AgentVersion,
+		UpdateState:       req.UpdateState,
+		SecureBootEnabled: req.SecureBoot,
+		SetupMode:         req.SetupMode,
+		PayloadJSON:       string(body),
 	}); err != nil {
 		if errors.Is(err, db.ErrInvalidStatus) {
 			writeJSONError(c, http.StatusBadRequest, "Invalid update_state")

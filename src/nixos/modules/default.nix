@@ -10,8 +10,10 @@
 }:
 
 let
+  fleetiSbEnrollPackage = pkgs.callPackage ../packages/fleeti-sb-enroll.nix { };
   fleetiAdminPackage = pkgs.callPackage ../packages/fleeti-admin.nix {
     sudoPath = "${config.security.wrapperDir}/sudo";
+    sbEnrollPath = "${fleetiSbEnrollPackage}/bin/fleeti-sb-enroll";
   };
 in
 {
@@ -230,6 +232,14 @@ in
           }
           {
             command = "${pkgs.systemd}/bin/systemctl reboot";
+            options = [ "NOPASSWD" ];
+          }
+          {
+            command = "${pkgs.systemd}/bin/systemctl reboot --firmware-setup";
+            options = [ "NOPASSWD" ];
+          }
+          {
+            command = "${fleetiSbEnrollPackage}/bin/fleeti-sb-enroll";
             options = [ "NOPASSWD" ];
           }
         ];

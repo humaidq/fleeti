@@ -246,6 +246,8 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Get("/profiles/{id}/deployments", routes.ProfileDeploymentsPage)
 		f.Get("/profiles/{id}/edit", routes.EditProfilePage)
 		f.Get("/profiles/{id}/security", routes.ProfileSecurityPage)
+		f.Get("/profiles/{id}/secure-boot", routes.ProfileSecureBootPage)
+		f.Get("/profiles/{id}/secure-boot/certificate", routes.ProfileSecureBootCertificate)
 		f.Get("/profiles/{id}/packages", routes.ProfilePackagesPage)
 		f.Post("/profiles/{id}/security", csrf.Validate, routes.UpdateProfileSecurity)
 		f.Post("/profiles/{id}/packages", csrf.Validate, routes.AddProfilePackage)

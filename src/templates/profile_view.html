@@ -25,6 +25,14 @@
     </span>
     <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
   </a>
+  <a href="/profiles/{{ .Profile.ID }}/secure-boot" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-key" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Secure Boot</span>
+      <span class="prof-config-meta">Per-profile Secure Boot signing key and certificate</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
   {{ if .CanManageProfile }}
   <a href="/profiles/{{ .Profile.ID }}/security" class="prof-config-card">
     <span class="prof-config-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>

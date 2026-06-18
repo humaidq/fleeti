@@ -1,0 +1,54 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+{{ template "profile_header" . }}
+
+<section class="section-card">
+  <h3>Secure Boot</h3>
+  <p class="muted-text">
+    Every image built under this profile is signed with this profile's Secure Boot
+    key. The key is generated and held by Fleeti and is never shared with the build
+    sandbox. Enroll the certificate below into a device's firmware (PK/KEK/db) to
+    verify Fleeti images under UEFI Secure Boot.
+  </p>
+
+  <dl class="meta-list">
+    <div class="meta-row">
+      <dt>Subject</dt>
+      <dd>{{ .SecureBootSubject }}</dd>
+    </div>
+    <div class="meta-row">
+      <dt>SHA-256 fingerprint</dt>
+      <dd><code>{{ .SecureBootFingerprint }}</code></dd>
+    </div>
+    <div class="meta-row">
+      <dt>Valid until · UTC</dt>
+      <dd>{{ .SecureBootNotAfter }}</dd>
+    </div>
+  </dl>
+
+  <div class="form-group">
+    <label for="profile-secureboot-cert">Public certificate (PEM)</label>
+    <textarea id="profile-secureboot-cert" class="form-item" rows="16" readonly>{{ .SecureBootCertPEM }}</textarea>
+    <small class="muted-text">This is the public certificate only. The private signing key never leaves Fleeti.</small>
+  </div>
+
+  <div class="form-actions">
+    <a href="{{ .SecureBootCertificatePath }}" class="btn" download><i class="fa-solid fa-download" aria-hidden="true"></i> Download certificate</a>
+    <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+  </div>
+</section>
+
+{{ template "foot" . }}

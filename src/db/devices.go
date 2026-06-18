@@ -83,12 +83,14 @@ type StartEnrollmentInput struct {
 
 // TelemetryInput is one telemetry submission from a paired device.
 type TelemetryInput struct {
-	DeviceID         string
-	ReportedVersion  string
-	AvailableVersion string
-	AgentVersion     string
-	UpdateState      string
-	PayloadJSON      string
+	DeviceID          string
+	ReportedVersion   string
+	AvailableVersion  string
+	AgentVersion      string
+	UpdateState       string
+	SecureBootEnabled bool
+	SetupMode         bool
+	PayloadJSON       string
 }
 
 // DeviceCommandRecord is a command with its outcome, for the device history view.
@@ -125,7 +127,9 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 			COALESCE(curr.version, ''),
 			COALESCE(des.version, ''),
 			d.update_state,
-			d.attestation_level,
+			d.secure_boot_enabled,
+			d.setup_mode,
+			d.attested,
 			COALESCE(to_char(d.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
 			to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
 			d.machine_id,
@@ -148,7 +152,9 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 		&item.CurrentReleaseVersion,
 		&item.DesiredReleaseVersion,
 		&item.UpdateState,
-		&item.AttestationLevel,
+		&item.SecureBootEnabled,
+		&item.SetupMode,
+		&item.Attested,
 		&item.LastSeenAt,
 		&item.CreatedAt,
 		&item.MachineID,
@@ -306,16 +312,18 @@ func RecordDeviceTelemetry(ctx context.Context, input TelemetryInput) error {
 		_, err = tx.Exec(ctx, `
 			UPDATE devices
 			SET reported_version = $2, available_version = $3, agent_version = $4, update_state = $5,
+				secure_boot_enabled = $6, setup_mode = $7,
 				last_seen_at = now(), last_telemetry_at = now()
 			WHERE id::text = $1
-		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion, state)
+		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion, state, input.SecureBootEnabled, input.SetupMode)
 	} else {
 		_, err = tx.Exec(ctx, `
 			UPDATE devices
 			SET reported_version = $2, available_version = $3, agent_version = $4,
+				secure_boot_enabled = $5, setup_mode = $6,
 				last_seen_at = now(), last_telemetry_at = now()
 			WHERE id::text = $1
-		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion)
+		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion, input.SecureBootEnabled, input.SetupMode)
 	}
 
 	if err != nil {
@@ -637,8 +645,8 @@ func ClaimEnrollmentCode(ctx context.Context, code string, claimedByUserID strin
 
 		err = tx.QueryRow(ctx, `
 			INSERT INTO devices
-				(fleet_id, hostname, serial_number, machine_id, reported_version, update_state, attestation_level, last_seen_at)
-			VALUES ($1, $2, $3, $4, $5, 'idle', 'unknown', now())
+				(fleet_id, hostname, serial_number, machine_id, reported_version, update_state, last_seen_at)
+			VALUES ($1, $2, $3, $4, $5, 'idle', now())
 			RETURNING id::text
 		`, fleetID, hostname, serial, machineID, reportedVer).Scan(&deviceID)
 
@@ -698,7 +706,7 @@ func AuthenticateDeviceToken(ctx context.Context, rawToken string) (*Device, err
 	)
 
 	err := pool.QueryRow(ctx, `
-		SELECT d.id::text, f.id::text, f.name, d.hostname, d.serial_number, d.update_state, d.attestation_level, t.id
+		SELECT d.id::text, f.id::text, f.name, d.hostname, d.serial_number, d.update_state, t.id
 		FROM device_tokens t
 		JOIN devices d ON d.id = t.device_id
 		JOIN fleets f ON f.id = d.fleet_id
@@ -710,7 +718,6 @@ func AuthenticateDeviceToken(ctx context.Context, rawToken string) (*Device, err
 		&device.Hostname,
 		&device.SerialNumber,
 		&device.UpdateState,
-		&device.AttestationLevel,
 		&tokenID,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

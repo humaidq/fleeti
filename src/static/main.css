@@ -2057,6 +2057,22 @@ label {
   color: #c98a00;
 }
 
+.device-attest-ok {
+  color: #1e7e34;
+}
+
+.device-attest-ok i {
+  color: #1e7e34;
+}
+
+.device-attest-none {
+  color: #8a8f96;
+}
+
+.device-attest-none i {
+  color: #b02a37;
+}
+
 .device-seen {
   font-size: 0.9rem;
   color: #44505c;

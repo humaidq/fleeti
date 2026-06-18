@@ -27,6 +27,13 @@
                 gotools
                 go-tools
                 golangci-lint
+                # Secure Boot signing tools for local end-to-end testing.
+                sbsigntool
+                efitools
+                mtools
+                util-linux
+                jq
+                xz
                 ;
             }
             ++ [

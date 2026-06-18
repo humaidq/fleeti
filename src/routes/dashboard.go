@@ -1065,6 +1065,145 @@ func loadProfileSecurityPageData(c flamego.Context, s session.Session, data temp
 	return profile, securityConfig, nil
 }
 
+// ProfileSecureBootPage renders the read-only Secure Boot key info for a profile.
+func ProfileSecureBootPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
+	setPage(data, "Profile Secure Boot")
+	data["IsProfiles"] = true
+
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
+
+		return
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	canView, err := db.UserCanViewProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	if !canView {
+		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
+
+		return
+	}
+
+	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		handleMutationError(c, s, "/profiles", err)
+
+		return
+	}
+
+	material, err := ensureProfileSecureBootMaterial(profile.ID, profile.Name)
+	if err != nil {
+		logger.Error("failed to prepare secure boot material", "profile_id", profile.ID, "error", err)
+		handleMutationError(c, s, profileViewPath(profile.ID), err)
+
+		return
+	}
+
+	details, err := secureBootCertInfo(material)
+	if err != nil {
+		logger.Error("failed to load secure boot certificate", "profile_id", profile.ID, "error", err)
+		handleMutationError(c, s, profileViewPath(profile.ID), err)
+
+		return
+	}
+
+	data["Profile"] = profile
+	data["CanManageProfile"] = canManage
+	data["SecureBootSubject"] = details.Subject
+	data["SecureBootFingerprint"] = details.Fingerprint
+	data["SecureBootNotAfter"] = details.NotAfter.Format("2006-01-02 15:04:05 MST")
+	data["SecureBootCertPEM"] = details.PEM
+	data["SecureBootCertificatePath"] = profileSecureBootCertificatePath(profile.ID)
+	data["ProfileNavActive"] = "secure_boot"
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Secure Boot"))
+
+	t.HTML(http.StatusOK, "profile_secureboot")
+}
+
+// ProfileSecureBootCertificate serves a profile's public Secure Boot certificate
+// (PEM) for download, e.g. for manual firmware key enrollment.
+func ProfileSecureBootCertificate(c flamego.Context, s session.Session) {
+	user, err := resolveSessionUser(c.Request().Context(), s)
+	if err != nil {
+		c.ResponseWriter().WriteHeader(http.StatusForbidden)
+
+		return
+	}
+
+	profileID := strings.TrimSpace(c.Param("id"))
+	if profileID == "" {
+		c.ResponseWriter().WriteHeader(http.StatusNotFound)
+
+		return
+	}
+
+	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
+	if err != nil {
+		c.ResponseWriter().WriteHeader(http.StatusNotFound)
+
+		return
+	}
+
+	canView, err := db.UserCanViewProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profile.ID)
+	if err != nil {
+		c.ResponseWriter().WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	if !canView {
+		c.ResponseWriter().WriteHeader(http.StatusForbidden)
+
+		return
+	}
+
+	material, err := ensureProfileSecureBootMaterial(profile.ID, profile.Name)
+	if err != nil {
+		logger.Error("failed to prepare secure boot material", "profile_id", profile.ID, "error", err)
+		c.ResponseWriter().WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	pemBytes, err := os.ReadFile(material.certPath)
+	if err != nil {
+		logger.Error("failed to read secure boot certificate", "profile_id", profile.ID, "error", err)
+		c.ResponseWriter().WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	header := c.ResponseWriter().Header()
+	header.Set("Content-Type", "application/x-pem-file")
+	header.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "fleeti-secureboot-"+profile.ID+".crt"))
+	header.Set("Content-Length", fmt.Sprintf("%d", len(pemBytes)))
+	c.ResponseWriter().WriteHeader(http.StatusOK)
+
+	if _, err := c.ResponseWriter().Write(pemBytes); err != nil {
+		logger.Warn("failed to write secure boot certificate response", "profile_id", profile.ID, "error", err)
+	}
+}
+
 // ProfileKernelPage renders kernel settings for a profile.
 func ProfileKernelPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
 	setPage(data, "Profile Kernel")
@@ -3245,6 +3384,10 @@ func profileRawNixPath(profileID string) string {
 
 func profileOpenclawPath(profileID string) string {
 	return "/profiles/" + profileID + "/openclaw"
+}
+
+func profileSecureBootCertificatePath(profileID string) string {
+	return "/profiles/" + profileID + "/secure-boot/certificate"
 }
 
 func profileSectionBreadcrumbs(profile db.ProfileEdit, section string) []BreadcrumbItem {

@@ -2,6 +2,7 @@
 <nav class="prof-tabs" aria-label="Profile sections">
   <a href="/profiles/{{ .Profile.ID }}" class="prof-tab{{ if eq .ProfileNavActive "summary" }} prof-tab-active{{ end }}"><i class="fa-solid fa-list" aria-hidden="true"></i>Summary</a>
   <a href="/profiles/{{ .Profile.ID }}/deployments" class="prof-tab{{ if eq .ProfileNavActive "deployments" }} prof-tab-active{{ end }}"><i class="fa-solid fa-rocket" aria-hidden="true"></i>Deployments</a>
+  <a href="/profiles/{{ .Profile.ID }}/secure-boot" class="prof-tab{{ if eq .ProfileNavActive "secure_boot" }} prof-tab-active{{ end }}"><i class="fa-solid fa-key" aria-hidden="true"></i>Secure Boot</a>
   {{ if .CanManageProfile }}
   <a href="/profiles/{{ .Profile.ID }}/security" class="prof-tab{{ if eq .ProfileNavActive "security" }} prof-tab-active{{ end }}"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Security</a>
   <a href="/profiles/{{ .Profile.ID }}/packages" class="prof-tab{{ if eq .ProfileNavActive "packages" }} prof-tab-active{{ end }}"><i class="fa-solid fa-box" aria-hidden="true"></i>Packages</a>

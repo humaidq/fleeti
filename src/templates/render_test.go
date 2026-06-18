@@ -57,11 +57,11 @@ func TestDevicesTemplateRenders(t *testing.T) {
 		t.Fatalf("failed to parse templates: %v", err)
 	}
 
-	device := func(host, serial, fleet, state, cur, desired, attest, seen string) map[string]any {
+	device := func(host, serial, fleet, state, cur, desired, tier, seen string) map[string]any {
 		return map[string]any{
 			"ID": host, "Hostname": host, "SerialNumber": serial, "FleetName": fleet,
 			"UpdateState": state, "CurrentReleaseVersion": cur, "DesiredReleaseVersion": desired,
-			"AttestationLevel": attest, "LastSeenAt": seen,
+			"AttestationTier": tier, "LastSeenAt": seen,
 		}
 	}
 
@@ -70,9 +70,9 @@ func TestDevicesTemplateRenders(t *testing.T) {
 		"IsDevices":  true,
 		"csrf_token": "tok",
 		"Devices": []map[string]any{
-			device("edge-node-01", "SN-7741-AA", "Production", "healthy", "v2.4.1", "v2.4.1", "measured-boot", "2026-06-05 08:12"),
-			device("edge-node-02", "SN-7741-AB", "Production", "downloading", "v2.4.0", "v2.4.1", "unknown", "2026-06-05 08:11"),
-			device("warehouse-gw-1", "SN-9001-WG", "Warehouse", "failed", "v2.3.8", "v2.4.1", "tpm-backed", "2026-06-05 06:32"),
+			device("edge-node-01", "SN-7741-AA", "Production", "healthy", "v2.4.1", "v2.4.1", "attested", "2026-06-05 08:12"),
+			device("edge-node-02", "SN-7741-AB", "Production", "downloading", "v2.4.0", "v2.4.1", "none", "2026-06-05 08:11"),
+			device("warehouse-gw-1", "SN-9001-WG", "Warehouse", "failed", "v2.3.8", "v2.4.1", "secure-boot", "2026-06-05 06:32"),
 		},
 	}
 
@@ -86,7 +86,7 @@ func TestDevicesTemplateRenders(t *testing.T) {
 		"+ Pair Device", "pair-code-input", "Device Inventory", "3 devices",
 		"device-card device-tone-ok", "device-card device-tone-warn", "device-card device-tone-err",
 		"edge-node-01", "SN-7741-AA", "status-badge status-downloading",
-		"ver-from", "ver-to", "device-attest-warn",
+		"ver-from", "ver-to", "device-attest-ok", "device-attest-warn", "device-attest-none",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered devices missing %q", want)

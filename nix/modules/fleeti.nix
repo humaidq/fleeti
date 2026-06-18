@@ -73,6 +73,9 @@ in
       path = [
         pkgs.git
         pkgs.nix
+        # The Secure Boot signing toolchain (sbsign, efitools, mtools, sfdisk,
+        # jq, xz) is wrapped onto the fleeti binary's PATH in src/default.nix,
+        # so it no longer needs to be listed here.
       ];
 
       serviceConfig = {

@@ -36,8 +36,14 @@
             "/EFI/Linux/${config.system.boot.loader.ukiFile}".source =
               "${config.system.build.uki}/${config.system.boot.loader.ukiFile}";
 
+            # Auto-enroll the profile's Secure Boot keys on first boot. The
+            # PK/KEK/db .auth files are injected into /loader/keys/auto by the
+            # post-build signing step (outside Nix) so the private key never
+            # enters the Nix store. systemd-boot only enrolls when the firmware
+            # is in setup mode; "if-safe" avoids clobbering existing OEM keys.
             "/loader/loader.conf".source = builtins.toFile "loader.conf" ''
               timeout 20
+              secure-boot-enroll if-safe
             '';
           };
           repartConfig = {

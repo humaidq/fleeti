@@ -11,6 +11,7 @@
   makeDesktopItem,
   python3Packages,
   sudoPath ? "sudo",
+  sbEnrollPath ? "fleeti-sb-enroll",
   symlinkJoin,
   systemd,
   wrapGAppsHook4,
@@ -64,6 +65,7 @@ let
         "--set" "FLEETI_SUDO" "${sudoPath}"
         "--set" "FLEETI_SYSTEMD_SYSUPDATE" "${systemd}/lib/systemd/systemd-sysupdate"
         "--set" "FLEETI_SYSTEMCTL" "${systemd}/bin/systemctl"
+        "--set" "FLEETI_SB_ENROLL" "${sbEnrollPath}"
         "--set" "FLEETI_ADMIND_STATUS" "/run/fleeti/admind/status.json"
       )
     '';

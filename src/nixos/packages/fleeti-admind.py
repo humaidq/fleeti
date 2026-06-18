@@ -112,6 +112,33 @@ def read_uptime_seconds():
         return 0
 
 
+EFIVARS_DIR = "/sys/firmware/efi/efivars"
+EFI_GLOBAL_GUID = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
+
+
+def read_efivar_flag(name):
+    # EFI variables carry 4 attribute bytes before the value.
+    path = os.path.join(EFIVARS_DIR, "%s-%s" % (name, EFI_GLOBAL_GUID))
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return None
+
+    if len(data) < 5:
+        return None
+
+    return data[4] != 0
+
+
+def read_secure_boot():
+    return bool(read_efivar_flag("SecureBoot"))
+
+
+def read_setup_mode():
+    return bool(read_efivar_flag("SetupMode"))
+
+
 def parse_json(text):
     try:
         payload = json.loads(text)
@@ -285,6 +312,8 @@ class Agent:
             "update_state": "healthy",
             "uptime_seconds": read_uptime_seconds(),
             "current_version": self.image_version(),
+            "secure_boot": read_secure_boot(),
+            "setup_mode": read_setup_mode(),
         }
         payload.update(self.refresh_update_status())
 

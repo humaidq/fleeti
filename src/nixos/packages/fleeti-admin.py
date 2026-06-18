@@ -18,8 +18,12 @@ from gi.repository import Gio, GLib, Gtk
 SYSTEMD_SYSUPDATE = os.environ.get("FLEETI_SYSTEMD_SYSUPDATE", "systemd-sysupdate")
 SYSTEMCTL = os.environ.get("FLEETI_SYSTEMCTL", "systemctl")
 SUDO = os.environ.get("FLEETI_SUDO", "sudo")
+SB_ENROLL = os.environ.get("FLEETI_SB_ENROLL", "fleeti-sb-enroll")
 OS_RELEASE_PATH = "/etc/os-release"
 AGENT_STATUS_PATH = os.environ.get("FLEETI_ADMIND_STATUS", "/run/fleeti/admind/status.json")
+
+EFIVARS_DIR = "/sys/firmware/efi/efivars"
+EFI_GLOBAL_GUID = "8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
 
 def run_command(args):
@@ -83,6 +87,36 @@ def read_agent_status():
         return None
 
     return payload
+
+
+def read_efivar_flag(name):
+    # EFI variables are prefixed with 4 attribute bytes; the value follows.
+    path = os.path.join(EFIVARS_DIR, "%s-%s" % (name, EFI_GLOBAL_GUID))
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return None
+
+    if len(data) < 5:
+        return None
+
+    return data[4] != 0
+
+
+def read_secure_boot_state():
+    if not os.path.isdir(EFIVARS_DIR):
+        return {"supported": False, "secure_boot": False, "setup_mode": False}
+
+    secure_boot = read_efivar_flag("SecureBoot")
+    if secure_boot is None:
+        return {"supported": False, "secure_boot": False, "setup_mode": False}
+
+    return {
+        "supported": True,
+        "secure_boot": bool(secure_boot),
+        "setup_mode": bool(read_efivar_flag("SetupMode")),
+    }
 
 
 def is_sysupdate_status_output(stderr):
@@ -342,9 +376,38 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.provision_instructions_label.set_xalign(0)
         root.append(self.provision_instructions_label)
 
+        # Secure Boot section. Independent of pairing: a device can be managed
+        # with or without Secure Boot enrolled.
+        root.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+
+        sb_title = Gtk.Label()
+        sb_title.set_markup("<span weight='bold'>Secure Boot</span>")
+        sb_title.set_xalign(0)
+        root.append(sb_title)
+
+        self.sb_busy = False
+        self.sb_action = None
+
+        self.sb_status_label = Gtk.Label()
+        self.sb_status_label.set_wrap(True)
+        self.sb_status_label.set_xalign(0)
+        root.append(self.sb_status_label)
+
+        self.sb_detail_label = Gtk.Label()
+        self.sb_detail_label.set_wrap(True)
+        self.sb_detail_label.set_xalign(0)
+        root.append(self.sb_detail_label)
+
+        self.sb_button = Gtk.Button()
+        self.sb_button.set_halign(Gtk.Align.START)
+        self.sb_button.connect("clicked", self.on_sb_button_clicked)
+        root.append(self.sb_button)
+
         return root
 
     def refresh_provision(self):
+        self.refresh_secure_boot()
+
         status = read_agent_status()
 
         if status is None:
@@ -397,6 +460,84 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         else:
             self.provision_code_label.set_text("")
             self.provision_code_label.set_visible(False)
+
+    def refresh_secure_boot(self):
+        # Don't clobber the UI while an enrol/reboot action is in flight.
+        if self.sb_busy:
+            return
+
+        state = read_secure_boot_state()
+
+        if not state["supported"]:
+            self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>unavailable</span>")
+            self.sb_detail_label.set_text("This device did not boot via UEFI.")
+            self.sb_button.set_visible(False)
+            self.sb_action = None
+            return
+
+        if state["secure_boot"]:
+            self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Active</span>")
+            self.sb_detail_label.set_text("This device is protected by Secure Boot.")
+            self.sb_button.set_visible(False)
+            self.sb_action = None
+            return
+
+        if state["setup_mode"]:
+            self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Not enrolled</span>")
+            self.sb_detail_label.set_text(
+                "Firmware is in setup mode. Enroll the Fleeti keys to enable Secure Boot."
+            )
+            self.sb_button.set_label("Enroll Secure Boot keys")
+            self.sb_button.set_sensitive(True)
+            self.sb_button.set_visible(True)
+            self.sb_action = "enroll"
+            return
+
+        self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Not enrolled</span>")
+        self.sb_detail_label.set_text(
+            "Restart into UEFI setup so Fleeti can enroll its Secure Boot keys."
+        )
+        self.sb_button.set_label("Restart into UEFI setup")
+        self.sb_button.set_sensitive(True)
+        self.sb_button.set_visible(True)
+        self.sb_action = "firmware-setup"
+
+    def on_sb_button_clicked(self, _button):
+        if self.sb_action == "enroll":
+            self.sb_busy = True
+            self.sb_button.set_sensitive(False)
+            self.sb_detail_label.set_text("Enrolling Secure Boot keys...")
+            self.run_async([SB_ENROLL], self.on_sb_enroll_finished)
+        elif self.sb_action == "firmware-setup":
+            self.sb_busy = True
+            self.sb_button.set_sensitive(False)
+            self.sb_detail_label.set_text("Restarting into UEFI setup...")
+            self.run_async([SYSTEMCTL, "reboot", "--firmware-setup"], self.on_sb_reboot_finished)
+
+    def on_sb_enroll_finished(self, result):
+        self.sb_busy = False
+        self.sb_button.set_sensitive(True)
+        if result.returncode != 0:
+            message = format_privileged_error(result.stderr.strip(), "Secure Boot enrollment failed.")
+            self.sb_detail_label.set_text("Failed to enroll Secure Boot keys: " + message)
+            return False
+
+        self.sb_button.set_visible(False)
+        self.sb_detail_label.set_text("Secure Boot keys enrolled. Restart to activate Secure Boot.")
+        return False
+
+    def on_sb_reboot_finished(self, result):
+        self.sb_busy = False
+        self.sb_button.set_sensitive(True)
+        if result.returncode != 0:
+            message = format_privileged_error(
+                result.stderr.strip(), "Could not restart into UEFI setup."
+            )
+            self.sb_detail_label.set_text("Failed to restart into UEFI setup: " + message)
+            return False
+
+        self.sb_detail_label.set_text("Restarting into UEFI setup...")
+        return False
 
     def set_busy(self, message):
         is_busy = bool(message)

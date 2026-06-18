@@ -75,12 +75,12 @@
         </div>
         <div class="device-meta-field">
           <span class="device-meta-label">Attestation</span>
-          {{ if eq .AttestationLevel "tpm-backed" }}
-          <span class="device-attest"><i class="fa-solid fa-microchip" aria-hidden="true"></i> {{ .AttestationLevel }}</span>
-          {{ else if and .AttestationLevel (ne .AttestationLevel "unknown") }}
-          <span class="device-attest"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> {{ .AttestationLevel }}</span>
+          {{ if eq .AttestationTier "attested" }}
+          <span class="device-attest device-attest-ok"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> attested</span>
+          {{ else if eq .AttestationTier "secure-boot" }}
+          <span class="device-attest device-attest-warn"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> secure boot</span>
           {{ else }}
-          <span class="device-attest device-attest-warn"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> unknown</span>
+          <span class="device-attest device-attest-none"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> none</span>
           {{ end }}
         </div>
         <div class="device-meta-field">

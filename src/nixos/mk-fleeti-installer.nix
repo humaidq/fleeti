@@ -21,9 +21,18 @@ let
       (
         { modulesPath, pkgs, ... }:
         let
+          # The Fleeti web service stages the already-signed system image here
+          # (outside Nix) before building the installer, so the flashed system
+          # boots under Secure Boot. When the file is present the signed image is
+          # embedded; otherwise (e.g. a standalone `nix build .#fleeti-installer`)
+          # the unsigned in-Nix image is used. The private signing key is never
+          # referenced by Nix.
+          localImage = ./installer-image/image.raw;
+          useLocalImage = builtins.pathExists localImage;
+          imageSource = if useLocalImage then "${localImage}" else "${image}/${imageFile}";
           compressedImage = pkgs.runCommand "${name}-installer-image-${sanitizedImageFile}" { } ''
             mkdir -p "$out"
-            ${pkgs.zstd}/bin/zstd --quiet --force --stdout "${image}/${imageFile}" > "$out/${imageFile}.zst"
+            ${pkgs.zstd}/bin/zstd --quiet --force --stdout "${imageSource}" > "$out/${imageFile}.zst"
           '';
         in
         {

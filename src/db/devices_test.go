@@ -9,6 +9,29 @@ import (
 	"testing"
 )
 
+func TestDeviceAttestationTier(t *testing.T) {
+	cases := []struct {
+		name       string
+		secureBoot bool
+		attested   bool
+		want       string
+	}{
+		{"no secure boot", false, false, "none"},
+		{"secure boot only", true, false, "secure-boot"},
+		{"secure boot and attested", true, true, "attested"},
+		{"attested without secure boot stays none", false, true, "none"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := Device{SecureBootEnabled: tc.secureBoot, Attested: tc.attested}
+			if got := d.AttestationTier(); got != tc.want {
+				t.Fatalf("AttestationTier() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEnrollmentCodeAlphabetIsUnbiased(t *testing.T) {
 	if len(enrollmentCodeAlphabet) != 32 {
 		t.Fatalf("enrollment alphabet must be 32 symbols for unbiased selection, got %d", len(enrollmentCodeAlphabet))
