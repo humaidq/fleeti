@@ -8,100 +8,88 @@
 </div>
 
 <section class="section-card">
-  <h3>Pair Device</h3>
-  <p class="muted-text">
-    Open the <strong>Provision</strong> page in Fleeti Admin on the device to get its pairing
-    code, then enter it below. The device's fleet is detected automatically.
-  </p>
-  <form method="post" action="/devices/pair" class="add-item-form">
-    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
-    <div class="add-item-field">
-      <label for="pair-code">Pairing Code</label>
-      <input id="pair-code" name="code" class="form-item" maxlength="12" required
-        autocomplete="off" autocapitalize="characters" spellcheck="false"
-        placeholder="e.g. 7K4PQ2" style="text-transform: uppercase;" />
-    </div>
-    <button type="submit" class="btn">Pair Device</button>
-  </form>
-</section>
-
-<section class="section-card">
-  <h3>Create Device</h3>
   <details class="add-item-details">
-    <summary class="add-item-summary">+ Create Device</summary>
-    <form method="post" action="/devices" class="add-item-form">
-      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
-      <div class="add-item-field">
-        <label for="device-fleet">Fleet</label>
-        <select id="device-fleet" name="fleet_id" class="form-item" required>
-          <option value="">Select fleet</option>
-          {{ range .Fleets }}
-          <option value="{{ .ID }}">{{ .Name }}</option>
-          {{ end }}
-        </select>
-      </div>
-      <div class="add-item-field">
-        <label for="device-hostname">Hostname</label>
-        <input id="device-hostname" name="hostname" class="form-item" required />
-      </div>
-      <div class="add-item-field">
-        <label for="device-serial">Serial Number</label>
-        <input id="device-serial" name="serial_number" class="form-item" required />
-      </div>
-      <div class="add-item-field">
-        <label for="device-state">Update State</label>
-        <select id="device-state" name="update_state" class="form-item">
-          <option value="idle">idle</option>
-          <option value="downloading">downloading</option>
-          <option value="applying">applying</option>
-          <option value="rebooting">rebooting</option>
-          <option value="healthy">healthy</option>
-          <option value="degraded">degraded</option>
-          <option value="failed">failed</option>
-        </select>
-      </div>
-      <div class="add-item-field">
-        <label for="device-attestation">Attestation Level</label>
-        <input id="device-attestation" name="attestation_level" class="form-item" value="unknown" />
-      </div>
-      <button type="submit" class="btn">Create Device</button>
-    </form>
+    <summary class="add-item-summary">+ Pair Device</summary>
+    <div class="add-item-form">
+      <p class="muted-text">
+        Open the <strong>Provision</strong> page in Fleeti Admin on the device to get its pairing
+        code, then enter it below. The device's fleet is detected automatically.
+      </p>
+      <form method="post" action="/devices/pair">
+        <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+        <div class="pair-device-form">
+          <div class="pair-device-field">
+            <label for="pair-code">Pairing Code</label>
+            <input id="pair-code" name="code" class="pair-code-input" maxlength="6" required
+              autocomplete="off" autocapitalize="characters" spellcheck="false"
+              placeholder="7K4PQ2" aria-describedby="pair-code-hint" />
+            <span id="pair-code-hint" class="muted-text">6-character code · letters and numbers</span>
+          </div>
+          <button type="submit" class="btn">Pair Device</button>
+        </div>
+      </form>
+    </div>
   </details>
 </section>
 
 <section class="section-card">
-  <h3>Device Inventory</h3>
+  <div class="profile-section-card-header" style="margin-bottom: 0.8rem;">
+    <h3 style="margin: 0;">Device Inventory</h3>
+    {{ if .Devices }}<span class="muted-text">{{ len .Devices }} device{{ if ne (len .Devices) 1 }}s{{ end }}</span>{{ end }}
+  </div>
   {{ if .Devices }}
-  <div class="table-card">
-    <table class="contacts-list">
-      <thead>
-        <tr>
-          <th>Hostname</th>
-          <th>Serial</th>
-          <th>Fleet</th>
-          <th>State</th>
-          <th>Current</th>
-          <th>Desired</th>
-          <th>Last Seen (UTC)</th>
-        </tr>
-      </thead>
-      <tbody>
-      {{ range .Devices }}
-        <tr>
-          <td><a href="/devices/{{ .ID }}"><strong>{{ .Hostname }}</strong></a></td>
-          <td><code>{{ .SerialNumber }}</code></td>
-          <td>{{ .FleetName }}</td>
-          <td>
-            <span class="status-badge status-{{ .UpdateState }}">{{ .UpdateState }}</span>
-            <span class="muted-text">{{ .AttestationLevel }}</span>
-          </td>
-          <td>{{ if .CurrentReleaseVersion }}{{ .CurrentReleaseVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
-          <td>{{ if .DesiredReleaseVersion }}{{ .DesiredReleaseVersion }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
-          <td>{{ if .LastSeenAt }}{{ .LastSeenAt }}{{ else }}<span class="muted-text">-</span>{{ end }}</td>
-        </tr>
-      {{ end }}
-      </tbody>
-    </table>
+  <div class="device-list">
+    {{ range .Devices }}
+    {{ $tone := "neutral" }}
+    {{ if eq .UpdateState "healthy" }}{{ $tone = "ok" }}
+    {{ else if or (eq .UpdateState "downloading") (eq .UpdateState "applying") (eq .UpdateState "rebooting") }}{{ $tone = "warn" }}
+    {{ else if or (eq .UpdateState "degraded") (eq .UpdateState "failed") }}{{ $tone = "err" }}
+    {{ end }}
+    {{ $pending := and .CurrentReleaseVersion .DesiredReleaseVersion (ne .CurrentReleaseVersion .DesiredReleaseVersion) }}
+    <div class="device-card device-tone-{{ $tone }}">
+      <div class="device-card-head">
+        <span class="device-dot device-dot-{{ $tone }}" aria-hidden="true"></span>
+        <div class="device-id">
+          <a class="device-host" href="/devices/{{ .ID }}">{{ .Hostname }}</a>
+          <div class="device-sub">
+            {{ if .SerialNumber }}<span class="device-serial">{{ .SerialNumber }}</span>{{ end }}
+            {{ if and .SerialNumber .FleetName }}<span class="device-sep" aria-hidden="true">·</span>{{ end }}
+            {{ if .FleetName }}<span>{{ .FleetName }}</span>{{ end }}
+          </div>
+        </div>
+        <span class="status-badge status-{{ .UpdateState }}">{{ .UpdateState }}</span>
+      </div>
+      <div class="device-meta-grid">
+        <div class="device-meta-field">
+          <span class="device-meta-label">Version</span>
+          <span class="device-version">
+            {{ if .CurrentReleaseVersion }}
+              <span class="ver-from">{{ .CurrentReleaseVersion }}</span>
+              {{ if $pending }}<i class="fa-solid fa-arrow-right-long device-ver-arrow" aria-hidden="true"></i><span class="ver-to">{{ .DesiredReleaseVersion }}</span>{{ end }}
+            {{ else if .DesiredReleaseVersion }}
+              <span class="ver-to">{{ .DesiredReleaseVersion }}</span>
+            {{ else }}
+              <span class="muted-text">—</span>
+            {{ end }}
+          </span>
+        </div>
+        <div class="device-meta-field">
+          <span class="device-meta-label">Attestation</span>
+          {{ if eq .AttestationLevel "tpm-backed" }}
+          <span class="device-attest"><i class="fa-solid fa-microchip" aria-hidden="true"></i> {{ .AttestationLevel }}</span>
+          {{ else if and .AttestationLevel (ne .AttestationLevel "unknown") }}
+          <span class="device-attest"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> {{ .AttestationLevel }}</span>
+          {{ else }}
+          <span class="device-attest device-attest-warn"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> unknown</span>
+          {{ end }}
+        </div>
+        <div class="device-meta-field">
+          <span class="device-meta-label">Last Seen (UTC)</span>
+          <span class="device-seen">{{ if .LastSeenAt }}{{ .LastSeenAt }}{{ else }}—{{ end }}</span>
+        </div>
+      </div>
+    </div>
+    {{ end }}
   </div>
   {{ else }}
   <p class="muted-text">No devices yet.</p>

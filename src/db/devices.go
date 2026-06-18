@@ -34,11 +34,12 @@ const (
 type DeviceDetail struct {
 	Device
 
-	MachineID       string
-	ReportedVersion string
-	AgentVersion    string
-	LastTelemetryAt string
-	Paired          bool
+	MachineID        string
+	ReportedVersion  string
+	AvailableVersion string
+	AgentVersion     string
+	LastTelemetryAt  string
+	Paired           bool
 }
 
 // DeviceTelemetryRecord is one stored telemetry sample.
@@ -82,11 +83,23 @@ type StartEnrollmentInput struct {
 
 // TelemetryInput is one telemetry submission from a paired device.
 type TelemetryInput struct {
-	DeviceID        string
-	ReportedVersion string
-	AgentVersion    string
-	UpdateState     string
-	PayloadJSON     string
+	DeviceID         string
+	ReportedVersion  string
+	AvailableVersion string
+	AgentVersion     string
+	UpdateState      string
+	PayloadJSON      string
+}
+
+// DeviceCommandRecord is a command with its outcome, for the device history view.
+type DeviceCommandRecord struct {
+	ID            string
+	Kind          string
+	TargetVersion string
+	Status        string
+	Result        string
+	CreatedAt     string
+	CompletedAt   string
 }
 
 // GetDeviceByID loads a single device with its telemetry/identity fields.
@@ -117,6 +130,7 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 			to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
 			d.machine_id,
 			d.reported_version,
+			d.available_version,
 			d.agent_version,
 			COALESCE(to_char(d.last_telemetry_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
 			EXISTS(SELECT 1 FROM device_tokens t WHERE t.device_id = d.id)
@@ -139,6 +153,7 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 		&item.CreatedAt,
 		&item.MachineID,
 		&item.ReportedVersion,
+		&item.AvailableVersion,
 		&item.AgentVersion,
 		&item.LastTelemetryAt,
 		&item.Paired,
@@ -290,17 +305,17 @@ func RecordDeviceTelemetry(ctx context.Context, input TelemetryInput) error {
 	if state != "" {
 		_, err = tx.Exec(ctx, `
 			UPDATE devices
-			SET reported_version = $2, agent_version = $3, update_state = $4,
+			SET reported_version = $2, available_version = $3, agent_version = $4, update_state = $5,
 				last_seen_at = now(), last_telemetry_at = now()
 			WHERE id::text = $1
-		`, deviceID, input.ReportedVersion, input.AgentVersion, state)
+		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion, state)
 	} else {
 		_, err = tx.Exec(ctx, `
 			UPDATE devices
-			SET reported_version = $2, agent_version = $3,
+			SET reported_version = $2, available_version = $3, agent_version = $4,
 				last_seen_at = now(), last_telemetry_at = now()
 			WHERE id::text = $1
-		`, deviceID, input.ReportedVersion, input.AgentVersion)
+		`, deviceID, input.ReportedVersion, input.AvailableVersion, input.AgentVersion)
 	}
 
 	if err != nil {
@@ -735,6 +750,10 @@ func CreateDeviceCommand(ctx context.Context, deviceID string, kind string, targ
 		VALUES ($1, $2, $3, $4)
 	`, strings.TrimSpace(deviceID), kind, strings.TrimSpace(targetVersion), createdBy)
 
+	if uniqueViolation(err) {
+		return ErrDeviceCommandPending
+	}
+
 	if foreignKeyViolation(err) {
 		return ErrDeviceNotFound
 	}
@@ -744,6 +763,62 @@ func CreateDeviceCommand(ctx context.Context, deviceID string, kind string, targ
 	}
 
 	return nil
+}
+
+// ListRecentDeviceCommands returns recent commands and their outcomes for a device.
+func ListRecentDeviceCommands(ctx context.Context, deviceID string, limit int) ([]DeviceCommandRecord, error) {
+	if pool == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT
+			id::text,
+			kind,
+			target_version,
+			status,
+			result,
+			to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+			COALESCE(to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '')
+		FROM device_commands
+		WHERE device_id::text = $1
+		ORDER BY created_at DESC
+		LIMIT $2
+	`, strings.TrimSpace(deviceID), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recent device commands: %w", err)
+	}
+
+	defer rows.Close()
+
+	commands := make([]DeviceCommandRecord, 0)
+	for rows.Next() {
+		var command DeviceCommandRecord
+
+		if err := rows.Scan(
+			&command.ID,
+			&command.Kind,
+			&command.TargetVersion,
+			&command.Status,
+			&command.Result,
+			&command.CreatedAt,
+			&command.CompletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan device command record: %w", err)
+		}
+
+		commands = append(commands, command)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed during device command rows iteration: %w", err)
+	}
+
+	return commands, nil
 }
 
 // ListPendingDeviceCommands returns commands awaiting execution by a device.

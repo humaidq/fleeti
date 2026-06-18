@@ -13,155 +13,76 @@
 </nav>
 {{ end }}
 
-<div class="page-header">
-  <h2>Profile Summary</h2>
-  <div class="page-header-actions">
-    {{ if .CanManageProfile }}
-    <a href="/profiles/{{ .Profile.ID }}/wizard" class="btn">Open AI Wizard</a>
-    {{ end }}
-    {{ if .CanManageProfile }}
-    <form method="post" action="/profiles/{{ .Profile.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this profile and all associated builds, releases, and rollouts? This cannot be undone.');">
-      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
-      <button type="submit" class="btn btn-danger">Delete Permanently</button>
-    </form>
-    {{ end }}
-    <a href="/profiles" class="btn">Back to Profiles</a>
-  </div>
-</div>
+{{ template "profile_header" . }}
 
-<section class="section-card">
-  <h3>{{ .Profile.Name }}</h3>
-  <p class="muted-text">
-    Current revision: r{{ .Profile.LatestRevision }}
-    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
-  </p>
-  <p class="muted-text">Created (UTC): {{ .Profile.CreatedAt }}</p>
-  {{ if .Profile.Description }}
-  <p>{{ .Profile.Description }}</p>
-  {{ else }}
-  <p class="muted-text">No description provided.</p>
+<div class="dash-section-label">Configuration</div>
+<div class="prof-config-grid">
+  <a href="/profiles/{{ .Profile.ID }}/deployments" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-rocket" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Deployments</span>
+      <span class="prof-config-meta">Builds, releases, and rollouts for this profile</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  {{ if .CanManageProfile }}
+  <a href="/profiles/{{ .Profile.ID }}/security" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Security</span>
+      <span class="prof-config-meta">{{ .SecuritySummary }}</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/packages" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-box" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Packages</span>
+      <span class="prof-config-meta">{{ .PackageCount }} package{{ if ne .PackageCount 1 }}s{{ end }} configured</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/kernel" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-microchip" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Kernel</span>
+      <span class="prof-config-meta">{{ .KernelSummary }}</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/openclaw" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-cubes" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">MoltHouse</span>
+      <span class="prof-config-meta">{{ .OpenClawMicroVMSummary }}</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-code" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Raw Nix</span>
+      <span class="prof-config-meta">{{ if .HasRawNix }}Custom raw nix is set{{ else }}No raw nix override{{ end }}</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/access" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-user-group" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Access</span>
+      <span class="prof-config-meta">Users with full access to this profile</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
+  <a href="/profiles/{{ .Profile.ID }}/edit" class="prof-config-card">
+    <span class="prof-config-icon"><i class="fa-solid fa-sliders" aria-hidden="true"></i></span>
+    <span class="prof-config-body">
+      <span class="prof-config-title">Settings</span>
+      <span class="prof-config-meta">Name, description, and assigned fleets</span>
+    </span>
+    <span class="prof-config-go"><i class="fa-solid fa-arrow-right" aria-hidden="true"></i></span>
+  </a>
   {{ end }}
-  {{ template "profile_nav" . }}
-</section>
-
-<section class="section-card">
-  <h3>Configuration Overview</h3>
-  <div class="list-card-list">
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Deployments</div>
-          <div class="muted-text">Builds, releases, and rollouts for this profile</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/deployments" class="btn">Open Deployments</a>
-      </div>
-    </div>
-    {{ if .CanManageProfile }}
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">AI Wizard</div>
-          <div class="muted-text">Chat through requirements before applying changes</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/wizard" class="btn">Open AI Wizard</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Settings</div>
-          <div class="muted-text">Name, description, and assigned fleets</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/edit" class="btn">Open Settings</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Access</div>
-          <div class="muted-text">Users with full access to this profile</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/access" class="btn">Open Access</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Security</div>
-          <div class="muted-text">{{ .SecuritySummary }}</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/security" class="btn">Open Security</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">AI Security Search</div>
-          <div class="muted-text">Generate and rank candidate hardening profiles from an OS goal</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/security/search" class="btn">Open Search</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Packages</div>
-          <div class="muted-text">{{ .PackageCount }} package{{ if ne .PackageCount 1 }}s{{ end }} configured</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/packages" class="btn">Open Packages</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Kernel</div>
-          <div class="muted-text">{{ .KernelSummary }}</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/kernel" class="btn">Open Kernel</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">OpenClaw</div>
-          <div class="muted-text">{{ .OpenClawMicroVMSummary }}</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/openclaw" class="btn">Open OpenClaw</a>
-      </div>
-    </div>
-    <div class="list-card profile-section-card">
-      <div class="profile-section-card-header">
-        <div>
-          <div class="list-card-title">Raw Nix</div>
-          <div class="muted-text">{{ if .HasRawNix }}Custom raw nix is set{{ else }}No raw nix override{{ end }}</div>
-        </div>
-        <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="btn">Open Raw Nix</a>
-      </div>
-    </div>
-    {{ end }}
-  </div>
-</section>
-
-{{ if .Packages }}
-<section class="section-card">
-  <h3>Selected Packages</h3>
-  <div class="table-card">
-    <table class="contacts-list responsive-stack-table">
-      <thead>
-        <tr>
-          <th>Package</th>
-        </tr>
-      </thead>
-      <tbody>
-      {{ range .Packages }}
-        <tr>
-          <td data-label="Package"><code>{{ . }}</code></td>
-        </tr>
-      {{ end }}
-      </tbody>
-    </table>
-  </div>
-</section>
-{{ end }}
+</div>
 
 {{ template "foot" . }}

@@ -140,6 +140,21 @@ def post_json(url, payload, token=None, timeout=15):
         return exc.code, parse_json(body)
 
 
+def get_json(url, token=None, timeout=15):
+    headers = {}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8", "replace")
+            return response.status, parse_json(body)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        return exc.code, parse_json(body)
+
+
 class Agent:
     def __init__(self):
         self.fleet_id = env("FLEETI_ADMIND_FLEET_ID").strip()
@@ -149,8 +164,10 @@ class Agent:
         self.os_release = env("FLEETI_ADMIND_OS_RELEASE", "/etc/os-release")
         self.telemetry_interval = env_int("FLEETI_ADMIND_TELEMETRY_INTERVAL", 60)
         self.poll_interval = env_int("FLEETI_ADMIND_POLL_INTERVAL", 5)
+        self.command_poll_interval = env_int("FLEETI_ADMIND_COMMAND_POLL_INTERVAL", 15)
         self.update_check_interval = env_int("FLEETI_ADMIND_UPDATE_CHECK_INTERVAL", 900)
         self.sysupdate = env("FLEETI_SYSTEMD_SYSUPDATE")
+        self.systemctl = env("FLEETI_SYSTEMCTL")
 
         self.machine_id = read_machine_id()
         self.state_path = os.path.join(self.state_dir, "state.json")
@@ -159,6 +176,7 @@ class Agent:
         self.state = {"paired": False, "device_id": "", "device_token": "", "code": ""}
         self.last_error = ""
         self.last_telemetry_at = ""
+        self.last_telemetry_monotonic = 0.0
         self.update_status = {}
         self.last_update_check = 0.0
 
@@ -384,10 +402,111 @@ class Agent:
             self.write_status()
             self._sleep(self.poll_interval)
 
-    def do_telemetry_cycle(self):
-        self.send_telemetry()
+    def do_paired_cycle(self):
+        now = time.monotonic()
+        if self.last_telemetry_monotonic == 0.0 or (now - self.last_telemetry_monotonic) >= self.telemetry_interval:
+            self.send_telemetry()
+            self.last_telemetry_monotonic = time.monotonic()
+            if not self.state.get("paired"):
+                self.write_status()
+                return
+
+        self.poll_and_execute_commands()
         self.write_status()
-        self._sleep(self.telemetry_interval)
+        self._sleep(self.command_poll_interval)
+
+    def poll_and_execute_commands(self):
+        if not self.state.get("paired"):
+            return
+
+        for command in self.get_commands():
+            if self.stop.is_set():
+                return
+
+            self.execute_command(command)
+
+    def get_commands(self):
+        try:
+            status, body = get_json(self.api("/api/v1/device/commands"), self.state.get("device_token"))
+        except urllib.error.URLError as exc:
+            self.last_error = "command poll failed: %s" % exc
+            return []
+
+        if status == 401:
+            # Token revoked (device deleted / re-pair): drop it and re-enroll.
+            self.last_error = "device token rejected; re-enrolling"
+            self.state = {"paired": False, "device_id": "", "device_token": "", "code": ""}
+            self.save_state()
+            return []
+
+        if status != 200 or not body:
+            return []
+
+        commands = body.get("commands")
+        return commands if isinstance(commands, list) else []
+
+    def execute_command(self, command):
+        command_id = command.get("id")
+        kind = command.get("kind")
+        target = command.get("target_version", "")
+        if not command_id or not kind:
+            return
+
+        # Acknowledge first so the command leaves the pending state and is not
+        # picked up again on the next poll.
+        self.report_command(command_id, "acknowledged", "")
+
+        if kind == "update":
+            returncode, output = self.run_update(target)
+            if returncode == 0:
+                self.report_command(command_id, "succeeded", "Update installed; rebooting.")
+                self.reboot()
+            else:
+                self.report_command(command_id, "failed", output)
+        elif kind == "reboot":
+            self.report_command(command_id, "succeeded", "Rebooting.")
+            self.reboot()
+        else:
+            self.report_command(command_id, "failed", "Unknown command kind: %s" % kind)
+
+    def run_update(self, target):
+        if not self.sysupdate:
+            return 1, "systemd-sysupdate is not configured"
+
+        args = [self.sysupdate, "--no-pager", "update"]
+        if target:
+            args.append(target)
+
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True, timeout=1800, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 1, "update failed: %s" % exc
+
+        if proc.returncode != 0:
+            return proc.returncode, (proc.stderr.strip() or proc.stdout.strip() or "update failed")
+
+        return 0, ""
+
+    def reboot(self):
+        if not self.systemctl:
+            self.last_error = "systemctl is not configured"
+            return
+
+        try:
+            subprocess.run([self.systemctl, "reboot"], capture_output=True, text=True, timeout=60, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.last_error = "reboot failed: %s" % exc
+
+    def report_command(self, command_id, status, result):
+        payload = {"status": status, "result": result}
+        try:
+            post_json(
+                self.api("/api/v1/device/commands/%s/result" % command_id),
+                payload,
+                token=self.state.get("device_token"),
+            )
+        except urllib.error.URLError as exc:
+            self.last_error = "command result failed: %s" % exc
 
     def run(self):
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -405,7 +524,7 @@ class Agent:
 
         while not self.stop.is_set():
             if self.state.get("paired"):
-                self.do_telemetry_cycle()
+                self.do_paired_cycle()
             else:
                 self.do_enrollment()
 

@@ -24,6 +24,7 @@ type User struct {
 	IsAdmin     bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	LastLoginAt *time.Time
 }
 
 // UserPasskey represents a stored WebAuthn credential.
@@ -158,6 +159,200 @@ func CountUsers(ctx context.Context) (int, error) {
 	}
 
 	return count, nil
+}
+
+// CountAdmins returns the number of admin users.
+func CountAdmins(ctx context.Context) (int, error) {
+	if pool == nil {
+		return 0, ErrDatabaseConnectionNotInitialized
+	}
+
+	var count int
+
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE is_admin`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count admins: %w", err)
+	}
+
+	return count, nil
+}
+
+// UserSummary represents a user with their passkey count for admin listings.
+type UserSummary struct {
+	User
+
+	PasskeyCount int
+}
+
+// ListUsers returns all users with their passkey counts, oldest first.
+func ListUsers(ctx context.Context) ([]UserSummary, error) {
+	if pool == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT u.id, u.display_name, u.is_admin, u.created_at, u.updated_at, u.last_login_at, COUNT(p.id) AS passkey_count
+		FROM users u
+		LEFT JOIN user_passkeys p ON p.user_id = u.id
+		GROUP BY u.id
+		ORDER BY u.created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	defer rows.Close()
+
+	users := make([]UserSummary, 0)
+
+	for rows.Next() {
+		var user UserSummary
+
+		if err := rows.Scan(
+			&user.ID,
+			&user.DisplayName,
+			&user.IsAdmin,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+			&user.LastLoginAt,
+			&user.PasskeyCount,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+
+		users = append(users, user)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating users: %w", err)
+	}
+
+	return users, nil
+}
+
+// UpdateUserLastLogin records the timestamp of a user's most recent successful login.
+func UpdateUserLastLogin(ctx context.Context, userID string, when time.Time) error {
+	if pool == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE users SET last_login_at = $2 WHERE id = $1`, userID, when); err != nil {
+		return fmt.Errorf("failed to update last login: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteUser removes a user by ID. Related passkeys, API keys, and permissions
+// cascade automatically via foreign-key constraints.
+func DeleteUser(ctx context.Context, id string) error {
+	if pool == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	command, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete user: %w", err)
+	}
+
+	if command.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+
+	return nil
+}
+
+// FinalizeRecoveryRegistrationInput defines data for passkey recovery.
+type FinalizeRecoveryRegistrationInput struct {
+	UserID     uuid.UUID
+	InviteID   string
+	Credential webauthn.Credential
+	Label      *string
+}
+
+// FinalizeRecoveryRegistration consumes a recovery invite, wipes the user's
+// existing passkeys, and stores the newly registered passkey in a single
+// transaction. The user's identity, admin status, and access are preserved.
+func FinalizeRecoveryRegistration(ctx context.Context, input FinalizeRecoveryRegistrationInput) (*User, error) {
+	if pool == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	if strings.TrimSpace(input.InviteID) == "" {
+		return nil, ErrInviteInvalidOrUsed
+	}
+
+	if _, err := uuid.Parse(strings.TrimSpace(input.InviteID)); err != nil {
+		return nil, ErrInviteInvalidOrUsed
+	}
+
+	credentialData, err := encodeCredential(input.Credential)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start recovery transaction: %w", err)
+	}
+
+	defer func() {
+		if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			logger.Warn("failed to rollback recovery transaction", "error", rollbackErr)
+		}
+	}()
+
+	command, err := tx.Exec(ctx, `
+		UPDATE user_invites
+		SET used_at = NOW()
+		WHERE id = $1
+		  AND user_id = $2
+		  AND used_at IS NULL
+		  AND created_at >= NOW() - INTERVAL '24 hours'
+	`, strings.TrimSpace(input.InviteID), input.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to consume recovery invite: %w", err)
+	}
+
+	if command.RowsAffected() == 0 {
+		return nil, ErrInviteInvalidOrUsed
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM user_passkeys WHERE user_id = $1`, input.UserID); err != nil {
+		return nil, fmt.Errorf("failed to wipe existing passkeys: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_passkeys (user_id, credential_id, credential_data, label, last_used_at)
+		VALUES ($1, $2, $3, $4, NULL)
+	`, input.UserID, input.Credential.ID, credentialData, input.Label); err != nil {
+		return nil, fmt.Errorf("failed to store passkey: %w", err)
+	}
+
+	var user User
+
+	if err := tx.QueryRow(ctx, `
+		SELECT id, display_name, is_admin, created_at, updated_at
+		FROM users
+		WHERE id = $1
+	`, input.UserID).Scan(
+		&user.ID,
+		&user.DisplayName,
+		&user.IsAdmin,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+
+		return nil, fmt.Errorf("failed to load recovered user: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit recovery transaction: %w", err)
+	}
+
+	return &user, nil
 }
 
 // GetUserByID returns a user by ID.

@@ -45,6 +45,7 @@ var (
 	ErrDeviceNotFound              = errors.New("device not found")
 	ErrDeviceTokenNotFound         = errors.New("device token not found")
 	ErrDeviceCommandNotFound       = errors.New("device command not found")
+	ErrDeviceCommandPending        = errors.New("a command is already queued for this device")
 	ErrEnrollmentNotFound          = errors.New("pairing code not found")
 	ErrEnrollmentExpired           = errors.New("pairing code has expired")
 	ErrEnrollmentAlreadyClaimed    = errors.New("pairing code was already used")

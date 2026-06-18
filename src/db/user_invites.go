@@ -18,6 +18,9 @@ import (
 )
 
 // UserInvite represents an invitation token for provisioning a user.
+//
+// When UserID is nil the invite provisions a brand-new account. When UserID is
+// set the invite is a passkey recovery link for that existing user.
 type UserInvite struct {
 	ID          uuid.UUID
 	Token       string
@@ -25,6 +28,7 @@ type UserInvite struct {
 	CreatedAt   time.Time
 	UsedAt      *time.Time
 	CreatedBy   *uuid.UUID
+	UserID      *uuid.UUID
 }
 
 // CreateUserInvite creates a new invite token.
@@ -59,7 +63,7 @@ func CreateUserInvite(ctx context.Context, createdBy string, displayName string)
 	err = pool.QueryRow(ctx, `
 		INSERT INTO user_invites (token, display_name, created_by)
 		VALUES ($1, $2, $3)
-		RETURNING id, token, display_name, created_at, used_at, created_by
+		RETURNING id, token, display_name, created_at, used_at, created_by, user_id
 	`, token, displayNamePtr, createdByID).Scan(
 		&invite.ID,
 		&invite.Token,
@@ -67,9 +71,62 @@ func CreateUserInvite(ctx context.Context, createdBy string, displayName string)
 		&invite.CreatedAt,
 		&invite.UsedAt,
 		&invite.CreatedBy,
+		&invite.UserID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create invite: %w", err)
+	}
+
+	return &invite, nil
+}
+
+// CreateUserRecoveryInvite creates a passkey recovery link for an existing user.
+// The display name is copied from the target user for display purposes.
+func CreateUserRecoveryInvite(ctx context.Context, createdBy string, targetUserID string) (*UserInvite, error) {
+	if pool == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	target, err := GetUserByID(ctx, targetUserID)
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := generateInviteToken()
+	if err != nil {
+		return nil, err
+	}
+
+	var createdByID *uuid.UUID
+
+	if strings.TrimSpace(createdBy) != "" {
+		parsed, err := uuid.Parse(createdBy)
+		if err != nil {
+			return nil, ErrInvalidCreatorID
+		}
+
+		createdByID = &parsed
+	}
+
+	displayName := target.DisplayName
+
+	var invite UserInvite
+
+	err = pool.QueryRow(ctx, `
+		INSERT INTO user_invites (token, display_name, created_by, user_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, token, display_name, created_at, used_at, created_by, user_id
+	`, token, &displayName, createdByID, target.ID).Scan(
+		&invite.ID,
+		&invite.Token,
+		&invite.DisplayName,
+		&invite.CreatedAt,
+		&invite.UsedAt,
+		&invite.CreatedBy,
+		&invite.UserID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create recovery invite: %w", err)
 	}
 
 	return &invite, nil
@@ -82,9 +139,10 @@ func ListPendingUserInvites(ctx context.Context) ([]UserInvite, error) {
 	}
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, token, display_name, created_at, used_at, created_by
+		SELECT id, token, display_name, created_at, used_at, created_by, user_id
 		FROM user_invites
 		WHERE used_at IS NULL
+		  AND user_id IS NULL
 		  AND created_at >= NOW() - INTERVAL '24 hours'
 		ORDER BY created_at DESC
 	`)
@@ -106,6 +164,7 @@ func ListPendingUserInvites(ctx context.Context) ([]UserInvite, error) {
 			&invite.CreatedAt,
 			&invite.UsedAt,
 			&invite.CreatedBy,
+			&invite.UserID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan invite: %w", err)
 		}
@@ -120,6 +179,53 @@ func ListPendingUserInvites(ctx context.Context) ([]UserInvite, error) {
 	return invites, nil
 }
 
+// ListPendingRecoveryInvites returns all active passkey recovery links.
+func ListPendingRecoveryInvites(ctx context.Context) ([]UserInvite, error) {
+	if pool == nil {
+		return nil, ErrDatabaseConnectionNotInitialized
+	}
+
+	rows, err := pool.Query(ctx, `
+		SELECT id, token, display_name, created_at, used_at, created_by, user_id
+		FROM user_invites
+		WHERE used_at IS NULL
+		  AND user_id IS NOT NULL
+		  AND created_at >= NOW() - INTERVAL '24 hours'
+		ORDER BY created_at DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recovery invites: %w", err)
+	}
+
+	defer rows.Close()
+
+	invites := make([]UserInvite, 0)
+
+	for rows.Next() {
+		var invite UserInvite
+
+		if err := rows.Scan(
+			&invite.ID,
+			&invite.Token,
+			&invite.DisplayName,
+			&invite.CreatedAt,
+			&invite.UsedAt,
+			&invite.CreatedBy,
+			&invite.UserID,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan recovery invite: %w", err)
+		}
+
+		invites = append(invites, invite)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating recovery invites: %w", err)
+	}
+
+	return invites, nil
+}
+
 // ListExpiredUserInvites returns all unused invites older than 24 hours.
 func ListExpiredUserInvites(ctx context.Context) ([]UserInvite, error) {
 	if pool == nil {
@@ -127,9 +233,10 @@ func ListExpiredUserInvites(ctx context.Context) ([]UserInvite, error) {
 	}
 
 	rows, err := pool.Query(ctx, `
-		SELECT id, token, display_name, created_at, used_at, created_by
+		SELECT id, token, display_name, created_at, used_at, created_by, user_id
 		FROM user_invites
 		WHERE used_at IS NULL
+		  AND user_id IS NULL
 		  AND created_at < NOW() - INTERVAL '24 hours'
 		ORDER BY created_at DESC
 	`)
@@ -151,6 +258,7 @@ func ListExpiredUserInvites(ctx context.Context) ([]UserInvite, error) {
 			&invite.CreatedAt,
 			&invite.UsedAt,
 			&invite.CreatedBy,
+			&invite.UserID,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan expired invite: %w", err)
 		}
@@ -174,7 +282,7 @@ func GetUserInviteByToken(ctx context.Context, token string) (*UserInvite, error
 	var invite UserInvite
 
 	err := pool.QueryRow(ctx, `
-		SELECT id, token, display_name, created_at, used_at, created_by
+		SELECT id, token, display_name, created_at, used_at, created_by, user_id
 		FROM user_invites
 		WHERE token = $1
 		  AND used_at IS NULL
@@ -186,6 +294,7 @@ func GetUserInviteByToken(ctx context.Context, token string) (*UserInvite, error
 		&invite.CreatedAt,
 		&invite.UsedAt,
 		&invite.CreatedBy,
+		&invite.UserID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -207,7 +316,7 @@ func GetUserInviteByID(ctx context.Context, id string) (*UserInvite, error) {
 	var invite UserInvite
 
 	err := pool.QueryRow(ctx, `
-		SELECT id, token, display_name, created_at, used_at, created_by
+		SELECT id, token, display_name, created_at, used_at, created_by, user_id
 		FROM user_invites
 		WHERE id = $1
 		  AND used_at IS NULL
@@ -219,6 +328,7 @@ func GetUserInviteByID(ctx context.Context, id string) (*UserInvite, error) {
 		&invite.CreatedAt,
 		&invite.UsedAt,
 		&invite.CreatedBy,
+		&invite.UserID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -251,7 +361,7 @@ func RegenerateExpiredUserInvite(ctx context.Context, id string) (*UserInvite, e
 		WHERE id = $2
 		  AND used_at IS NULL
 		  AND created_at < NOW() - INTERVAL '24 hours'
-		RETURNING id, token, display_name, created_at, used_at, created_by
+		RETURNING id, token, display_name, created_at, used_at, created_by, user_id
 	`, token, id).Scan(
 		&invite.ID,
 		&invite.Token,
@@ -259,6 +369,7 @@ func RegenerateExpiredUserInvite(ctx context.Context, id string) (*UserInvite, e
 		&invite.CreatedAt,
 		&invite.UsedAt,
 		&invite.CreatedBy,
+		&invite.UserID,
 	)
 	if err == nil {
 		return &invite, nil

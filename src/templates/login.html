@@ -33,8 +33,9 @@
     data-redirect-url="{{ .Next }}"
     data-next-path="{{ .Next }}"
     data-remember-input="#stay-logged-in"
-  >Authenticate</button>
+  ><i class="fa-solid fa-fingerprint" aria-hidden="true"></i>&nbsp;Authenticate</button>
 </div>
+<p class="muted-text">Sign in with a passkey registered to your account.</p>
 <p class="muted-text" data-webauthn-support></p>
 
 <script src="/webauthn.js" defer></script>

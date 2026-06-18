@@ -212,14 +212,6 @@ type CreateReleaseInput struct {
 	Notes   string
 }
 
-type CreateDeviceInput struct {
-	FleetID          string
-	Hostname         string
-	SerialNumber     string
-	UpdateState      string
-	AttestationLevel string
-}
-
 type CreateRolloutInput struct {
 	FleetID      string
 	ReleaseID    string
@@ -2367,62 +2359,6 @@ func ListDevices(ctx context.Context) ([]Device, error) {
 	}
 
 	return devices, nil
-}
-
-func CreateDevice(ctx context.Context, input CreateDeviceInput) error {
-	p := GetPool()
-	if p == nil {
-		return ErrDatabaseConnectionNotInitialized
-	}
-
-	input.FleetID = strings.TrimSpace(input.FleetID)
-	input.Hostname = strings.TrimSpace(input.Hostname)
-	input.SerialNumber = strings.TrimSpace(input.SerialNumber)
-	input.AttestationLevel = strings.TrimSpace(input.AttestationLevel)
-
-	state, err := normalizeDeviceState(input.UpdateState)
-	if err != nil {
-		return err
-	}
-
-	if input.FleetID == "" {
-		return ErrFleetRequired
-	}
-
-	if input.Hostname == "" {
-		return ErrHostnameRequired
-	}
-
-	if input.SerialNumber == "" {
-		return ErrSerialRequired
-	}
-
-	if input.AttestationLevel == "" {
-		input.AttestationLevel = "unknown"
-	}
-
-	_, err = p.Exec(ctx, `
-		INSERT INTO devices (fleet_id, hostname, serial_number, update_state, attestation_level)
-		VALUES ($1, $2, $3, $4, $5)
-	`, input.FleetID, input.Hostname, input.SerialNumber, state, input.AttestationLevel)
-
-	if uniqueViolation(err) {
-		if strings.Contains(err.Error(), "devices_serial_number_key") {
-			return ErrDeviceSerialAlreadyExists
-		}
-
-		return ErrDeviceHostnameAlreadyExists
-	}
-
-	if foreignKeyViolation(err) {
-		return ErrFleetNotFound
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to create device: %w", err)
-	}
-
-	return nil
 }
 
 func DeleteDevicesByFleet(ctx context.Context, fleetID string) (int64, error) {

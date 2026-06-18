@@ -57,13 +57,14 @@ type agentEnrollPollResponse struct {
 }
 
 type agentTelemetryRequest struct {
-	ReportedVersion string `json:"reported_version"`
-	AgentVersion    string `json:"agent_version"`
-	UpdateState     string `json:"update_state"`
-	UptimeSeconds   int64  `json:"uptime_seconds"`
-	UpdatePending   bool   `json:"update_pending"`
-	CurrentVersion  string `json:"current_version"`
-	DesiredVersion  string `json:"desired_version"`
+	ReportedVersion  string `json:"reported_version"`
+	AgentVersion     string `json:"agent_version"`
+	UpdateState      string `json:"update_state"`
+	UptimeSeconds    int64  `json:"uptime_seconds"`
+	UpdatePending    bool   `json:"update_pending"`
+	CurrentVersion   string `json:"current_version"`
+	DesiredVersion   string `json:"desired_version"`
+	AvailableVersion string `json:"available_version"`
 }
 
 type agentCommand struct {
@@ -180,11 +181,12 @@ func AgentTelemetry(c flamego.Context, device *db.Device) {
 	}
 
 	if err := db.RecordDeviceTelemetry(c.Request().Context(), db.TelemetryInput{
-		DeviceID:        device.ID,
-		ReportedVersion: req.ReportedVersion,
-		AgentVersion:    req.AgentVersion,
-		UpdateState:     req.UpdateState,
-		PayloadJSON:     string(body),
+		DeviceID:         device.ID,
+		ReportedVersion:  req.ReportedVersion,
+		AvailableVersion: req.AvailableVersion,
+		AgentVersion:     req.AgentVersion,
+		UpdateState:      req.UpdateState,
+		PayloadJSON:      string(body),
 	}); err != nil {
 		if errors.Is(err, db.ErrInvalidStatus) {
 			writeJSONError(c, http.StatusBadRequest, "Invalid update_state")
@@ -201,8 +203,7 @@ func AgentTelemetry(c flamego.Context, device *db.Device) {
 	writeJSON(c, map[string]bool{"ok": true})
 }
 
-// AgentCommands returns the commands awaiting execution by a device. Groundwork:
-// no commands are created until the web force-update/reboot feature is wired.
+// AgentCommands returns the commands awaiting execution by a device.
 func AgentCommands(c flamego.Context, device *db.Device) {
 	commands, err := db.ListPendingDeviceCommands(c.Request().Context(), device.ID)
 	if err != nil {

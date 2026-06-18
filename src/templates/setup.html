@@ -1,7 +1,9 @@
 {{ template "head" . }}
 
 <div class="page-header">
-  {{ if .IsInviteSetup }}
+  {{ if .IsRecovery }}
+  <h2>Recover Account</h2>
+  {{ else if .IsInviteSetup }}
   <h2>Account Setup</h2>
   {{ else }}
   <h2>Admin Setup</h2>
@@ -21,7 +23,9 @@
 </div>
 
 {{ if .BootstrapReady }}
-  {{ if .IsInviteSetup }}
+  {{ if .IsRecovery }}
+  <p>Register a new passkey to recover access to your account. This link works once and expires after 24 hours. Any previously registered passkeys will be removed.</p>
+  {{ else if .IsInviteSetup }}
   <p>Create your account using a passkey. This setup link works once and expires after 24 hours.</p>
   {{ else }}
   <p>Create the first admin account using a passkey. This account will be able to add more passkeys later.</p>
@@ -29,7 +33,7 @@
 
   <div class="form-group">
     <label for="setup-display-name" class="item-title">Display name</label>
-    <input type="text" id="setup-display-name" class="form-item" required value="{{ .DisplayName }}" />
+    <input type="text" id="setup-display-name" class="form-item" required value="{{ .DisplayName }}"{{ if .IsRecovery }} readonly{{ end }} />
   </div>
 
   <div class="form-group">

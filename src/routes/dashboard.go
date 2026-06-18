@@ -58,6 +58,13 @@ func Dashboard(c flamego.Context, t template.Template, data template.Data) {
 
 	data["Counts"] = counts
 
+	healthPct := 0
+	if counts.Devices > 0 {
+		healthPct = int(float64(counts.HealthyDevices)/float64(counts.Devices)*100 + 0.5)
+	}
+
+	data["HealthPct"] = healthPct
+
 	t.HTML(http.StatusOK, "dashboard")
 }
 
@@ -873,56 +880,6 @@ func EditProfilePage(c flamego.Context, s session.Session, t template.Template, 
 		fleets = []db.Fleet{}
 	}
 
-	data["Profile"] = profile
-	data["Fleets"] = manageableFleetsForUser(user, fleets)
-	data["SelectedFleetIDs"] = fleetSelectionMap(profile.FleetIDs)
-	data["ProfileNavActive"] = "settings"
-	data["CanManageProfile"] = true
-
-	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Settings"))
-
-	t.HTML(http.StatusOK, "profile_edit")
-}
-
-// ProfileAccessPage renders profile access controls.
-func ProfileAccessPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
-	setPage(data, "Profile Access")
-	data["IsProfiles"] = true
-
-	user, err := resolveSessionUser(c.Request().Context(), s)
-	if err != nil {
-		redirectWithMessage(c, s, "/profiles", FlashError, "Access restricted")
-
-		return
-	}
-
-	profileID := strings.TrimSpace(c.Param("id"))
-	if profileID == "" {
-		redirectWithMessage(c, s, "/profiles", FlashError, "Profile not found")
-
-		return
-	}
-
-	profile, err := db.GetProfileForEdit(c.Request().Context(), profileID)
-	if err != nil {
-		handleMutationError(c, s, "/profiles", err)
-
-		return
-	}
-
-	canManage, err := db.UserCanManageProfile(c.Request().Context(), user.ID.String(), user.IsAdmin, profileID)
-	if err != nil {
-		handleMutationError(c, s, "/profiles", err)
-
-		return
-	}
-
-	if !canManage {
-		redirectWithMessage(c, s, profileViewPath(profileID), FlashError, "Access restricted")
-
-		return
-	}
-
 	profileViewers := []db.ViewerUser{}
 	profileUsersLoaded := false
 
@@ -950,11 +907,14 @@ func ProfileAccessPage(c flamego.Context, s session.Session, t template.Template
 	data["ProfileViewers"] = profileViewers
 
 	data["Profile"] = profile
-	data["ProfileNavActive"] = "access"
+	data["Fleets"] = manageableFleetsForUser(user, fleets)
+	data["SelectedFleetIDs"] = fleetSelectionMap(profile.FleetIDs)
+	data["ProfileNavActive"] = "settings"
 	data["CanManageProfile"] = true
-	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Access"))
 
-	t.HTML(http.StatusOK, "profile_access")
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Settings"))
+
+	t.HTML(http.StatusOK, "profile_edit")
 }
 
 // ProfilePackagesPage renders package search and package assignments for a profile.
@@ -1049,25 +1009,6 @@ func ProfileSecurityPage(c flamego.Context, s session.Session, t template.Templa
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Security"))
 
 	t.HTML(http.StatusOK, "profile_security")
-}
-
-// ProfileSecuritySearchPage renders AI-driven security candidate search for a profile.
-func ProfileSecuritySearchPage(c flamego.Context, s session.Session, t template.Template, data template.Data, ai *ProfileWizardAI) {
-	setPage(data, "AI Security Search")
-	data["IsProfiles"] = true
-
-	profile, _, err := loadProfileSecurityPageData(c, s, data)
-	if err != nil {
-		return
-	}
-
-	data["ProfileSecuritySearchPath"] = profileSecuritySearchPath(strings.TrimSpace(profile.ID))
-	data["ProfileSecuritySearchAvailable"] = ai != nil && ai.Enabled()
-	data["ProfileSecuritySearchDisabledReason"] = profileWizardDisabledReason(ai)
-	data["ProfileNavActive"] = "security_search"
-	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "AI Security Search"))
-
-	t.HTML(http.StatusOK, "profile_security_search")
 }
 
 func loadProfileSecurityPageData(c flamego.Context, s session.Session, data template.Data) (db.ProfileEdit, ProfileSecurityConfig, error) {
@@ -1243,7 +1184,7 @@ func ProfileRawNixPage(c flamego.Context, s session.Session, t template.Template
 
 // ProfileOpenClawPage renders OpenClaw settings for a profile.
 func ProfileOpenClawPage(c flamego.Context, s session.Session, t template.Template, data template.Data) {
-	setPage(data, "Profile OpenClaw")
+	setPage(data, "Profile MoltHouse")
 	data["IsProfiles"] = true
 
 	user, err := resolveSessionUser(c.Request().Context(), s)
@@ -1291,7 +1232,7 @@ func ProfileOpenClawPage(c flamego.Context, s session.Session, t template.Templa
 	data["OpenClawMicroVMEnabled"] = openclawMicroVMEnabled
 	data["ProfileNavActive"] = "openclaw"
 	data["CanManageProfile"] = true
-	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "OpenClaw"))
+	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "MoltHouse"))
 
 	t.HTML(http.StatusOK, "profile_openclaw")
 }
@@ -1365,9 +1306,8 @@ func ProfileDeploymentsPage(c flamego.Context, s session.Session, t template.Tem
 	data["Profile"] = profile
 	data["CanManageProfile"] = canManage
 	data["ProfileNavActive"] = "deployments"
-	data["ProfileBuilds"] = builds
-	data["ProfileReleases"] = releases
-	data["ProfileRollouts"] = rollouts
+	data["DeploymentChains"] = buildDeploymentChains(builds, releases, rollouts)
+	data["HasDeployments"] = len(builds) > 0
 	data["DeploymentFleets"] = fleets
 	setBreadcrumbs(data, profileSectionBreadcrumbs(profile, "Deployments"))
 
@@ -1466,8 +1406,8 @@ func AddProfileUser(c flamego.Context, s session.Session) {
 	}
 
 	profileID := strings.TrimSpace(c.Param("id"))
-	path := profileAccessPath(profileID)
-	if path == "/profiles//access" {
+	path := profileEditPath(profileID)
+	if path == "/profiles//edit" {
 		path = "/profiles"
 	}
 
@@ -1516,8 +1456,8 @@ func RemoveProfileUser(c flamego.Context, s session.Session) {
 	}
 
 	profileID := strings.TrimSpace(c.Param("id"))
-	path := profileAccessPath(profileID)
-	if path == "/profiles//access" {
+	path := profileEditPath(profileID)
+	if path == "/profiles//edit" {
 		path = "/profiles"
 	}
 
@@ -2773,183 +2713,7 @@ func DeleteBuild(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/builds", FlashSuccess, "Build permanently deleted")
 }
 
-// ReleasesPage renders releases list and create form.
-func ReleasesPage(c flamego.Context, t template.Template, data template.Data) {
-	setPage(data, "Releases")
-	data["IsReleases"] = true
-
-	releases, err := db.ListReleases(c.Request().Context())
-	if err != nil {
-		logger.Error("failed to list releases", "error", err)
-		setPageErrorFlash(data, "Failed to load releases")
-		releases = []db.Release{}
-	}
-
-	builds, err := db.ListBuilds(c.Request().Context())
-	if err != nil {
-		logger.Error("failed to list builds for release form", "error", err)
-		setPageErrorFlash(data, "Failed to load builds")
-
-		builds = []db.Build{}
-	}
-
-	data["Releases"] = releases
-	data["Builds"] = builds
-
-	t.HTML(http.StatusOK, "releases")
-}
-
-// ReleasePage renders release summary.
-func ReleasePage(c flamego.Context, s session.Session, _ template.Template, _ template.Data) {
-	releaseID := strings.TrimSpace(c.Param("id"))
-	if releaseID == "" {
-		redirectWithMessage(c, s, "/releases", FlashError, "Release not found")
-
-		return
-	}
-
-	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
-	if err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
-	if err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	if strings.TrimSpace(build.ProfileID) == "" {
-		handleMutationError(c, s, "/releases", db.ErrProfileRequired)
-
-		return
-	}
-
-	c.Redirect(profileReleasePath(build.ProfileID, release.ID), http.StatusSeeOther)
-}
-
-// CreateRelease handles release creation.
-func CreateRelease(c flamego.Context, s session.Session) {
-	if err := c.Request().ParseForm(); err != nil {
-		redirectWithMessage(c, s, "/releases", FlashError, "Failed to parse form")
-
-		return
-	}
-
-	input := db.CreateReleaseInput{
-		BuildID: strings.TrimSpace(c.Request().Form.Get("build_id")),
-		Channel: strings.TrimSpace(c.Request().Form.Get("channel")),
-		Version: strings.TrimSpace(c.Request().Form.Get("version")),
-		Notes:   strings.TrimSpace(c.Request().Form.Get("notes")),
-	}
-
-	if input.Version == "" {
-		build, err := db.GetBuildByID(c.Request().Context(), input.BuildID)
-		if err != nil {
-			handleMutationError(c, s, "/releases", err)
-
-			return
-		}
-
-		input.Version = build.Version
-	}
-
-	if err := db.CreateRelease(c.Request().Context(), input); err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	build, err := db.GetBuildByID(c.Request().Context(), input.BuildID)
-	if err != nil {
-		logger.Warn("release created but failed to load build for redirect", "build_id", input.BuildID, "error", err)
-		redirectWithMessage(c, s, "/releases", FlashSuccess, "Release created")
-
-		return
-	}
-
-	redirectWithMessage(c, s, profileDeploymentsReleasesPath(build.ProfileID), FlashSuccess, "Release created")
-}
-
-// WithdrawRelease marks a release as withdrawn and removes active fleet artifacts when needed.
-func WithdrawRelease(c flamego.Context, s session.Session) {
-	releaseID := strings.TrimSpace(c.Param("id"))
-	if releaseID == "" {
-		handleMutationError(c, s, "/releases", db.ErrReleaseRequired)
-
-		return
-	}
-
-	info, err := db.GetReleaseTakedownInfo(c.Request().Context(), releaseID)
-	if err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	if info.IsCurrentlyLive {
-		updatesDir, err := resolveUpdatesDirectory()
-		if err != nil {
-			logger.Error("failed to resolve updates directory for release takedown", "release_id", releaseID, "fleet_id", info.FleetID, "error", err)
-			redirectWithMessage(c, s, "/releases", FlashError, "Failed to remove active release artifacts")
-
-			return
-		}
-
-		if err := deactivateFleetReleaseArtifacts(updatesDir, info.FleetID); err != nil {
-			logger.Error("failed to remove active release artifacts", "release_id", releaseID, "fleet_id", info.FleetID, "error", err)
-			redirectWithMessage(c, s, "/releases", FlashError, "Failed to remove active release artifacts")
-
-			return
-		}
-	}
-
-	if err := db.SetReleaseStatus(c.Request().Context(), releaseID, db.ReleaseStatusWithdrawn); err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	redirectWithMessage(c, s, "/releases", FlashSuccess, "Release taken down")
-}
-
-// DeleteRelease permanently deletes a release and dependent rollouts.
-func DeleteRelease(c flamego.Context, s session.Session) {
-	releaseID := strings.TrimSpace(c.Param("id"))
-	if releaseID == "" {
-		handleMutationError(c, s, "/releases", db.ErrReleaseRequired)
-
-		return
-	}
-
-	profileID := ""
-	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
-	if err == nil {
-		build, buildErr := db.GetBuildByID(c.Request().Context(), release.BuildID)
-		if buildErr == nil {
-			profileID = strings.TrimSpace(build.ProfileID)
-		}
-	}
-
-	if err := deleteReleaseCascade(c.Request().Context(), releaseID); err != nil {
-		handleMutationError(c, s, "/releases", err)
-
-		return
-	}
-
-	if profileID != "" {
-		redirectWithMessage(c, s, profileDeploymentsReleasesPath(profileID), FlashSuccess, "Release permanently deleted")
-
-		return
-	}
-
-	redirectWithMessage(c, s, "/releases", FlashSuccess, "Release permanently deleted")
-}
-
-// DevicesPage renders devices list and create form.
+// DevicesPage renders the devices list.
 func DevicesPage(c flamego.Context, t template.Template, data template.Data) {
 	setPage(data, "Devices")
 	data["IsDevices"] = true
@@ -2961,43 +2725,9 @@ func DevicesPage(c flamego.Context, t template.Template, data template.Data) {
 		devices = []db.Device{}
 	}
 
-	fleets, err := db.ListFleets(c.Request().Context())
-	if err != nil {
-		logger.Error("failed to list fleets for device form", "error", err)
-		setPageErrorFlash(data, "Failed to load fleets")
-
-		fleets = []db.Fleet{}
-	}
-
 	data["Devices"] = devices
-	data["Fleets"] = fleets
 
 	t.HTML(http.StatusOK, "devices")
-}
-
-// CreateDevice handles device creation.
-func CreateDevice(c flamego.Context, s session.Session) {
-	if err := c.Request().ParseForm(); err != nil {
-		redirectWithMessage(c, s, "/devices", FlashError, "Failed to parse form")
-
-		return
-	}
-
-	input := db.CreateDeviceInput{
-		FleetID:          strings.TrimSpace(c.Request().Form.Get("fleet_id")),
-		Hostname:         strings.TrimSpace(c.Request().Form.Get("hostname")),
-		SerialNumber:     strings.TrimSpace(c.Request().Form.Get("serial_number")),
-		UpdateState:      strings.TrimSpace(c.Request().Form.Get("update_state")),
-		AttestationLevel: strings.TrimSpace(c.Request().Form.Get("attestation_level")),
-	}
-
-	if err := db.CreateDevice(c.Request().Context(), input); err != nil {
-		handleMutationError(c, s, "/devices", err)
-
-		return
-	}
-
-	redirectWithMessage(c, s, "/devices", FlashSuccess, "Device created")
 }
 
 // DeviceDetailPage renders a single device with its status and telemetry history.
@@ -3027,10 +2757,19 @@ func DeviceDetailPage(c flamego.Context, s session.Session, t template.Template,
 		telemetry = []db.DeviceTelemetryRecord{}
 	}
 
+	commands, err := db.ListRecentDeviceCommands(c.Request().Context(), device.ID, 10)
+	if err != nil {
+		logger.Error("failed to load device commands", "device_id", device.ID, "error", err)
+		setPageErrorFlash(data, "Failed to load device commands")
+
+		commands = []db.DeviceCommandRecord{}
+	}
+
 	data["Device"] = device
 	data["Telemetry"] = telemetry
-	// CommandsEnabled gates the future force-update / reboot actions in the template.
-	data["CommandsEnabled"] = false
+	data["Commands"] = commands
+	// CommandsEnabled renders the remote force-update / reboot actions in the template.
+	data["CommandsEnabled"] = true
 	setBreadcrumbs(data, []BreadcrumbItem{
 		{Name: "Devices", URL: "/devices"},
 		{Name: device.Hostname, IsCurrent: true},
@@ -3100,167 +2839,62 @@ func PairDevice(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Device paired")
 }
 
-// RolloutsPage renders rollouts list and create form.
-func RolloutsPage(c flamego.Context, t template.Template, data template.Data) {
-	setPage(data, "Rollouts")
-	data["IsRollouts"] = true
+// DeviceForceUpdate queues a remote command to install the latest release and reboot.
+func DeviceForceUpdate(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
 
-	rollouts, err := db.ListRollouts(c.Request().Context())
-	if err != nil {
-		logger.Error("failed to list rollouts", "error", err)
-		setPageErrorFlash(data, "Failed to load rollouts")
-		rollouts = []db.Rollout{}
+		return
 	}
 
-	fleets, err := db.ListFleets(c.Request().Context())
+	user, err := resolveSessionUser(c.Request().Context(), s)
 	if err != nil {
-		logger.Error("failed to list fleets for rollout form", "error", err)
-		setPageErrorFlash(data, "Failed to load fleets")
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
 
-		fleets = []db.Fleet{}
+		return
 	}
 
-	releases, err := db.ListReleases(c.Request().Context())
+	device, err := db.GetDeviceByID(c.Request().Context(), deviceID)
 	if err != nil {
-		logger.Error("failed to list releases for rollout form", "error", err)
-		setPageErrorFlash(data, "Failed to load releases")
+		handleMutationError(c, s, "/devices", err)
 
-		releases = []db.Release{}
+		return
 	}
 
-	data["Rollouts"] = rollouts
-	data["Fleets"] = fleets
-	data["Releases"] = releases
+	// Target the reported available version when known; empty installs the latest.
+	if err := db.CreateDeviceCommand(c.Request().Context(), device.ID, "update", device.AvailableVersion, user.ID.String()); err != nil {
+		handleMutationError(c, s, "/devices/"+deviceID, err)
 
-	t.HTML(http.StatusOK, "rollouts")
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Update queued. The device will update and reboot shortly.")
 }
 
-// RolloutPage renders rollout summary.
-func RolloutPage(c flamego.Context, s session.Session, _ template.Template, _ template.Data) {
-	rolloutID := strings.TrimSpace(c.Param("id"))
-	if rolloutID == "" {
-		redirectWithMessage(c, s, "/rollouts", FlashError, "Rollout not found")
+// DeviceReboot queues a remote reboot command for a device.
+func DeviceReboot(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
 
 		return
 	}
 
-	rollout, err := db.GetRolloutByID(c.Request().Context(), rolloutID)
+	user, err := resolveSessionUser(c.Request().Context(), s)
 	if err != nil {
-		handleMutationError(c, s, "/rollouts", err)
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
 
 		return
 	}
 
-	release, err := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
-	if err != nil {
-		handleMutationError(c, s, "/rollouts", err)
+	if err := db.CreateDeviceCommand(c.Request().Context(), deviceID, "reboot", "", user.ID.String()); err != nil {
+		handleMutationError(c, s, "/devices/"+deviceID, err)
 
 		return
 	}
 
-	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
-	if err != nil {
-		handleMutationError(c, s, "/rollouts", err)
-
-		return
-	}
-
-	if strings.TrimSpace(build.ProfileID) == "" {
-		handleMutationError(c, s, "/rollouts", db.ErrProfileRequired)
-
-		return
-	}
-
-	c.Redirect(profileRolloutPath(build.ProfileID, rollout.ID), http.StatusSeeOther)
-}
-
-// CreateRollout handles rollout creation.
-func CreateRollout(c flamego.Context, s session.Session) {
-	if err := c.Request().ParseForm(); err != nil {
-		redirectWithMessage(c, s, "/rollouts", FlashError, "Failed to parse form")
-
-		return
-	}
-
-	fleetID := strings.TrimSpace(c.Request().Form.Get("fleet_id"))
-	releaseID := strings.TrimSpace(c.Request().Form.Get("release_id"))
-	if fleetID == "" {
-		handleMutationError(c, s, "/rollouts", db.ErrFleetRequired)
-
-		return
-	}
-
-	if err := createAndActivateRollout(c.Request().Context(), fleetID, releaseID); err != nil {
-		if errors.Is(err, errRolloutArtifactActivationFailed) {
-			redirectWithMessage(c, s, "/rollouts", FlashError, "Failed to activate rollout artifacts")
-
-			return
-		}
-
-		handleMutationError(c, s, "/rollouts", err)
-
-		return
-	}
-
-	release, err := db.GetReleaseByID(c.Request().Context(), releaseID)
-	if err != nil {
-		logger.Warn("rollout created but failed to load release for redirect", "release_id", releaseID, "error", err)
-		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
-
-		return
-	}
-
-	build, err := db.GetBuildByID(c.Request().Context(), release.BuildID)
-	if err != nil {
-		logger.Warn("rollout created but failed to load build for redirect", "release_id", releaseID, "build_id", release.BuildID, "error", err)
-		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
-
-		return
-	}
-
-	if strings.TrimSpace(build.ProfileID) == "" {
-		redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout created and activated")
-
-		return
-	}
-
-	redirectWithMessage(c, s, profileDeploymentsRolloutsPath(build.ProfileID), FlashSuccess, "Rollout created and activated")
-}
-
-// DeleteRollout permanently deletes a rollout.
-func DeleteRollout(c flamego.Context, s session.Session) {
-	rolloutID := strings.TrimSpace(c.Param("id"))
-	if rolloutID == "" {
-		handleMutationError(c, s, "/rollouts", db.ErrRolloutNotFound)
-
-		return
-	}
-
-	profileID := ""
-	rollout, err := db.GetRolloutByID(c.Request().Context(), rolloutID)
-	if err == nil {
-		release, releaseErr := db.GetReleaseByID(c.Request().Context(), rollout.ReleaseID)
-		if releaseErr == nil {
-			build, buildErr := db.GetBuildByID(c.Request().Context(), release.BuildID)
-			if buildErr == nil {
-				profileID = strings.TrimSpace(build.ProfileID)
-			}
-		}
-	}
-
-	if err := db.DeleteRollout(c.Request().Context(), rolloutID); err != nil {
-		handleMutationError(c, s, "/rollouts", err)
-
-		return
-	}
-
-	if profileID != "" {
-		redirectWithMessage(c, s, profileDeploymentsRolloutsPath(profileID), FlashSuccess, "Rollout permanently deleted")
-
-		return
-	}
-
-	redirectWithMessage(c, s, "/rollouts", FlashSuccess, "Rollout permanently deleted")
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Reboot queued. The device will reboot shortly.")
 }
 
 func markRolloutFailed(ctx context.Context, rolloutID string) {
@@ -3411,6 +3045,57 @@ func filterRolloutsByReleaseIDs(rollouts []db.Rollout, releaseIDs map[string]str
 	return filtered
 }
 
+// releaseWithRollouts pairs a release with the rollouts created from it.
+type releaseWithRollouts struct {
+	Release  db.Release
+	Rollouts []db.Rollout
+}
+
+// deploymentChainView represents one build and everything downstream of it
+// (its releases and their rollouts), so the deployments page can render the
+// build -> release -> rollout lifecycle as a single card per build.
+type deploymentChainView struct {
+	Build    db.Build
+	Releases []releaseWithRollouts
+}
+
+// buildDeploymentChains groups the flat build/release/rollout lists into one
+// chain per build, preserving the input ordering of each list.
+func buildDeploymentChains(builds []db.Build, releases []db.Release, rollouts []db.Rollout) []deploymentChainView {
+	rolloutsByRelease := make(map[string][]db.Rollout)
+	for _, rollout := range rollouts {
+		releaseID := strings.TrimSpace(rollout.ReleaseID)
+		if releaseID == "" {
+			continue
+		}
+
+		rolloutsByRelease[releaseID] = append(rolloutsByRelease[releaseID], rollout)
+	}
+
+	releasesByBuild := make(map[string][]releaseWithRollouts)
+	for _, release := range releases {
+		buildID := strings.TrimSpace(release.BuildID)
+		if buildID == "" {
+			continue
+		}
+
+		releasesByBuild[buildID] = append(releasesByBuild[buildID], releaseWithRollouts{
+			Release:  release,
+			Rollouts: rolloutsByRelease[strings.TrimSpace(release.ID)],
+		})
+	}
+
+	chains := make([]deploymentChainView, 0, len(builds))
+	for _, build := range builds {
+		chains = append(chains, deploymentChainView{
+			Build:    build,
+			Releases: releasesByBuild[strings.TrimSpace(build.ID)],
+		})
+	}
+
+	return chains
+}
+
 func fleetsAssignedToProfile(profile db.ProfileEdit, fleets []db.Fleet) []db.Fleet {
 	assignedFleetIDs := make(map[string]struct{})
 
@@ -3532,24 +3217,12 @@ func profileEditPath(profileID string) string {
 	return "/profiles/" + profileID + "/edit"
 }
 
-func profileAccessPath(profileID string) string {
-	return "/profiles/" + profileID + "/access"
-}
-
 func profilePackagesPath(profileID string) string {
 	return "/profiles/" + profileID + "/packages"
 }
 
 func profileSecurityPath(profileID string) string {
 	return "/profiles/" + profileID + "/security"
-}
-
-func profileSecuritySearchPath(profileID string) string {
-	return "/profiles/" + profileID + "/security/search"
-}
-
-func profileSecuritySearchStatusPath(profileID, jobID string) string {
-	return "/profiles/" + profileID + "/security/search/" + jobID
 }
 
 func profilePackagesPathWithQuery(profileID, query string) string {
@@ -3624,30 +3297,6 @@ func buildBreadcrumbs(build db.Build) []BreadcrumbItem {
 
 	return []BreadcrumbItem{
 		{Name: "Builds", URL: "/builds"},
-		{Name: name, IsCurrent: true},
-	}
-}
-
-func releaseBreadcrumbs(release db.Release) []BreadcrumbItem {
-	name := strings.TrimSpace(release.Version)
-	if name == "" {
-		name = "Release"
-	}
-
-	return []BreadcrumbItem{
-		{Name: "Releases", URL: "/releases"},
-		{Name: name, IsCurrent: true},
-	}
-}
-
-func rolloutBreadcrumbs(rollout db.Rollout) []BreadcrumbItem {
-	name := strings.TrimSpace(rollout.ID)
-	if name == "" {
-		name = "Rollout"
-	}
-
-	return []BreadcrumbItem{
-		{Name: "Rollouts", URL: "/rollouts"},
 		{Name: name, IsCurrent: true},
 	}
 }
@@ -4178,6 +3827,8 @@ func mutationErrorMessage(err error) string {
 		return "Serial number already exists"
 	case errors.Is(err, db.ErrDeviceNotFound):
 		return "Device not found"
+	case errors.Is(err, db.ErrDeviceCommandPending):
+		return "A command is already queued for this device"
 	case errors.Is(err, db.ErrEnrollmentCodeRequired):
 		return "Pairing code is required"
 	case errors.Is(err, db.ErrEnrollmentNotFound):

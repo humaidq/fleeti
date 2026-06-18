@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1233,9 +1234,10 @@ type publishedArtifact struct {
 	mode fs.FileMode
 }
 
-func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID string) error {
+func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID, releaseVersion string) error {
 	fleetID = strings.TrimSpace(fleetID)
 	buildID = strings.TrimSpace(buildID)
+	releaseVersion = strings.TrimSpace(releaseVersion)
 
 	if !isSafeUpdatePathSegment(fleetID) {
 		return fmt.Errorf("invalid fleet identifier")
@@ -1243,6 +1245,10 @@ func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID string) error {
 
 	if !isSafeUpdatePathSegment(buildID) {
 		return fmt.Errorf("invalid build identifier")
+	}
+
+	if releaseVersion == "" {
+		return fmt.Errorf("release version is required to activate fleet artifacts")
 	}
 
 	sourceDir := filepath.Join(updatesDir, updatesArtifactsDirName, buildID)
@@ -1269,7 +1275,13 @@ func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID string) error {
 			mode = 0o644
 		}
 
-		destinationPath := filepath.Join(temporaryFleetDir, artifact.name)
+		// Devices receive the release version, which may differ from the build
+		// version baked into the artifact filenames. Rename artifacts to the
+		// release version so the (dynamically generated) SHA256SUMS and the
+		// filenames systemd-sysupdate matches on reflect the release.
+		destinationName := renameArtifactToReleaseVersion(artifact.name, releaseVersion)
+
+		destinationPath := filepath.Join(temporaryFleetDir, destinationName)
 		if err := copyFile(artifact.path, destinationPath, mode); err != nil {
 			return fmt.Errorf("failed to stage artifact %s for fleet rollout: %w", artifact.name, err)
 		}
@@ -1287,6 +1299,38 @@ func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID string) error {
 	cleanupTemporary = false
 
 	return nil
+}
+
+// publishedArtifactVersionSuffixes lists the recognised artifact filename
+// suffixes, longest first, so the version segment can be located and replaced.
+var publishedArtifactVersionSuffixes = []string{
+	".nix-store.raw.xz",
+	".nix-store.raw",
+	".efi.xz",
+	".efi",
+}
+
+// renameArtifactToReleaseVersion rewrites the version token of an update
+// artifact filename (shaped "<id>_<version><suffix>") to releaseVersion. Names
+// that don't match a known artifact suffix (e.g. SHA256SUMS) are returned
+// unchanged.
+func renameArtifactToReleaseVersion(name, releaseVersion string) string {
+	for _, suffix := range publishedArtifactVersionSuffixes {
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+
+		base := strings.TrimSuffix(name, suffix)
+
+		underscore := strings.LastIndex(base, "_")
+		if underscore < 0 {
+			return name
+		}
+
+		return base[:underscore+1] + releaseVersion + suffix
+	}
+
+	return name
 }
 
 func deactivateFleetReleaseArtifacts(updatesDir, fleetID string) error {
@@ -1407,4 +1451,74 @@ func trimBuildOutput(output string, maxBytes int) string {
 	}
 
 	return trimmed[len(trimmed)-maxBytes:]
+}
+
+var errRolloutArtifactActivationFailed = errors.New("failed to activate rollout artifacts")
+
+// createAndActivateRollout creates a rollout for the given fleet and release,
+// activates the corresponding update artifacts, and points the fleet at the
+// new desired release. It is shared by the rollout and profile deployment flows.
+func createAndActivateRollout(ctx context.Context, fleetID, releaseID string) error {
+	fleetID = strings.TrimSpace(fleetID)
+	releaseID = strings.TrimSpace(releaseID)
+
+	if fleetID == "" {
+		return db.ErrFleetRequired
+	}
+
+	if releaseID == "" {
+		return db.ErrReleaseRequired
+	}
+
+	deploymentInfo, err := db.GetReleaseDeploymentInfo(ctx, releaseID)
+	if err != nil {
+		return err
+	}
+
+	if deploymentInfo.FleetID != fleetID {
+		return db.ErrRolloutFleetReleaseMismatch
+	}
+
+	input := db.CreateRolloutInput{
+		FleetID:      fleetID,
+		ReleaseID:    releaseID,
+		Strategy:     db.RolloutStrategyAllAtOnce,
+		StagePercent: 100,
+		Status:       db.RolloutStatusInProgress,
+	}
+
+	rolloutID, err := db.CreateRollout(ctx, input)
+	if err != nil {
+		return err
+	}
+
+	updatesDir, err := resolveUpdatesDirectory()
+	if err != nil {
+		logger.Error("failed to resolve updates directory for rollout", "fleet_id", fleetID, "release_id", releaseID, "error", err)
+		markRolloutFailed(ctx, rolloutID)
+
+		return fmt.Errorf("%w: %v", errRolloutArtifactActivationFailed, err)
+	}
+
+	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, deploymentInfo.BuildID, deploymentInfo.ReleaseVersion); err != nil {
+		logger.Error("failed to activate fleet rollout artifacts", "fleet_id", fleetID, "release_id", releaseID, "build_id", deploymentInfo.BuildID, "error", err)
+		markRolloutFailed(ctx, rolloutID)
+
+		return fmt.Errorf("%w: %v", errRolloutArtifactActivationFailed, err)
+	}
+
+	if _, err := db.SetFleetDesiredRelease(ctx, fleetID, releaseID); err != nil {
+		logger.Error("failed to update fleet desired release", "fleet_id", fleetID, "release_id", releaseID, "rollout_id", rolloutID, "error", err)
+		markRolloutFailed(ctx, rolloutID)
+
+		return err
+	}
+
+	if err := db.UpdateRolloutStatus(ctx, rolloutID, db.RolloutStatusCompleted); err != nil {
+		logger.Error("failed to mark rollout as completed", "rollout_id", rolloutID, "error", err)
+
+		return err
+	}
+
+	return nil
 }

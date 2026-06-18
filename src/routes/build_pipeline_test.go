@@ -290,7 +290,7 @@ func TestActivateFleetReleaseArtifactsPreservesChecksumManifest(t *testing.T) {
 		t.Fatalf("publishBuildArtifacts returned error: %v", err)
 	}
 
-	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, "build-1"); err != nil {
+	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, "build-1", "v1.2.3"); err != nil {
 		t.Fatalf("activateFleetReleaseArtifacts returned error: %v", err)
 	}
 
@@ -302,6 +302,74 @@ func TestActivateFleetReleaseArtifactsPreservesChecksumManifest(t *testing.T) {
 
 	if string(activatedChecksum) != "checksum manifest\n" {
 		t.Fatalf("unexpected activated checksum manifest contents: %q", activatedChecksum)
+	}
+}
+
+func TestActivateFleetReleaseArtifactsRenamesToReleaseVersion(t *testing.T) {
+	t.Parallel()
+
+	resultDir := t.TempDir()
+	updatesDir := t.TempDir()
+	fleetID := "11111111-1111-1111-1111-111111111111"
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.nix-store.raw.xz"), []byte("raw"), 0o444); err != nil {
+		t.Fatalf("failed to create raw artifact: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.efi.xz"), []byte("uki"), 0o444); err != nil {
+		t.Fatalf("failed to create uki artifact: %v", err)
+	}
+
+	if _, err := publishBuildArtifacts(resultDir, updatesDir, "build-1"); err != nil {
+		t.Fatalf("publishBuildArtifacts returned error: %v", err)
+	}
+
+	// Build was v1.2.3 but the release uses a different version; activated
+	// artifacts must carry the release version so sysupdate sees it.
+	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, "build-1", "v2.0.0"); err != nil {
+		t.Fatalf("activateFleetReleaseArtifacts returned error: %v", err)
+	}
+
+	fleetDir := filepath.Join(updatesDir, fleetID)
+
+	for _, expected := range []string{"fleeti_v2.0.0.nix-store.raw.xz", "fleeti_v2.0.0.efi.xz"} {
+		if _, err := os.Stat(filepath.Join(fleetDir, expected)); err != nil {
+			t.Fatalf("expected activated artifact %s: %v", expected, err)
+		}
+	}
+
+	for _, unexpected := range []string{"fleeti_v1.2.3.nix-store.raw.xz", "fleeti_v1.2.3.efi.xz"} {
+		if _, err := os.Stat(filepath.Join(fleetDir, unexpected)); !os.IsNotExist(err) {
+			t.Fatalf("expected build-version artifact %s to be absent, stat err: %v", unexpected, err)
+		}
+	}
+}
+
+func TestRenameArtifactToReleaseVersion(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name           string
+		artifact       string
+		releaseVersion string
+		want           string
+	}{
+		{"nix-store raw xz", "fleeti_v1.2.3.nix-store.raw.xz", "v2.0.0", "fleeti_v2.0.0.nix-store.raw.xz"},
+		{"nix-store raw", "fleeti_v1.2.3.nix-store.raw", "v2.0.0", "fleeti_v2.0.0.nix-store.raw"},
+		{"uki efi xz", "fleeti_v1.2.3.efi.xz", "v2.0.0", "fleeti_v2.0.0.efi.xz"},
+		{"uki efi", "fleeti_v1.2.3.efi", "v2.0.0", "fleeti_v2.0.0.efi"},
+		{"checksum manifest passthrough", "SHA256SUMS", "v2.0.0", "SHA256SUMS"},
+		{"unknown suffix passthrough", "notes.txt", "v2.0.0", "notes.txt"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := renameArtifactToReleaseVersion(tc.artifact, tc.releaseVersion); got != tc.want {
+				t.Fatalf("renameArtifactToReleaseVersion(%q, %q) = %q, want %q", tc.artifact, tc.releaseVersion, got, tc.want)
+			}
+		})
 	}
 }
 

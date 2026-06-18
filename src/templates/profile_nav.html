@@ -1,17 +1,14 @@
 {{ define "profile_nav" }}
-<nav class="profile-section-nav" aria-label="Profile sections">
-  <a href="/profiles/{{ .Profile.ID }}" class="profile-section-link{{ if eq .ProfileNavActive "summary" }} profile-section-link-active{{ end }}">Summary</a>
-  <a href="/profiles/{{ .Profile.ID }}/deployments" class="profile-section-link{{ if eq .ProfileNavActive "deployments" }} profile-section-link-active{{ end }}">Deployments</a>
+<nav class="prof-tabs" aria-label="Profile sections">
+  <a href="/profiles/{{ .Profile.ID }}" class="prof-tab{{ if eq .ProfileNavActive "summary" }} prof-tab-active{{ end }}"><i class="fa-solid fa-list" aria-hidden="true"></i>Summary</a>
+  <a href="/profiles/{{ .Profile.ID }}/deployments" class="prof-tab{{ if eq .ProfileNavActive "deployments" }} prof-tab-active{{ end }}"><i class="fa-solid fa-rocket" aria-hidden="true"></i>Deployments</a>
   {{ if .CanManageProfile }}
-  <a href="/profiles/{{ .Profile.ID }}/wizard" class="profile-section-link{{ if eq .ProfileNavActive "wizard" }} profile-section-link-active{{ end }}">AI Wizard</a>
-  <a href="/profiles/{{ .Profile.ID }}/edit" class="profile-section-link{{ if eq .ProfileNavActive "settings" }} profile-section-link-active{{ end }}">Settings</a>
-  <a href="/profiles/{{ .Profile.ID }}/access" class="profile-section-link{{ if eq .ProfileNavActive "access" }} profile-section-link-active{{ end }}">Access</a>
-  <a href="/profiles/{{ .Profile.ID }}/security" class="profile-section-link{{ if eq .ProfileNavActive "security" }} profile-section-link-active{{ end }}">Security</a>
-  <a href="/profiles/{{ .Profile.ID }}/security/search" class="profile-section-link{{ if eq .ProfileNavActive "security_search" }} profile-section-link-active{{ end }}">AI Security Search</a>
-  <a href="/profiles/{{ .Profile.ID }}/packages" class="profile-section-link{{ if eq .ProfileNavActive "packages" }} profile-section-link-active{{ end }}">Packages</a>
-  <a href="/profiles/{{ .Profile.ID }}/kernel" class="profile-section-link{{ if eq .ProfileNavActive "kernel" }} profile-section-link-active{{ end }}">Kernel</a>
-  <a href="/profiles/{{ .Profile.ID }}/openclaw" class="profile-section-link{{ if eq .ProfileNavActive "openclaw" }} profile-section-link-active{{ end }}">OpenClaw</a>
-  <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="profile-section-link{{ if eq .ProfileNavActive "raw_nix" }} profile-section-link-active{{ end }}">Raw Nix</a>
+  <a href="/profiles/{{ .Profile.ID }}/security" class="prof-tab{{ if eq .ProfileNavActive "security" }} prof-tab-active{{ end }}"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i>Security</a>
+  <a href="/profiles/{{ .Profile.ID }}/packages" class="prof-tab{{ if eq .ProfileNavActive "packages" }} prof-tab-active{{ end }}"><i class="fa-solid fa-box" aria-hidden="true"></i>Packages</a>
+  <a href="/profiles/{{ .Profile.ID }}/kernel" class="prof-tab{{ if eq .ProfileNavActive "kernel" }} prof-tab-active{{ end }}"><i class="fa-solid fa-microchip" aria-hidden="true"></i>Kernel</a>
+  <a href="/profiles/{{ .Profile.ID }}/openclaw" class="prof-tab{{ if eq .ProfileNavActive "openclaw" }} prof-tab-active{{ end }}"><i class="fa-solid fa-cubes" aria-hidden="true"></i>MoltHouse</a>
+  <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="prof-tab{{ if eq .ProfileNavActive "raw_nix" }} prof-tab-active{{ end }}"><i class="fa-solid fa-code" aria-hidden="true"></i>Raw Nix</a>
+  <a href="/profiles/{{ .Profile.ID }}/edit" class="prof-tab{{ if eq .ProfileNavActive "settings" }} prof-tab-active{{ end }}"><i class="fa-solid fa-sliders" aria-hidden="true"></i>Settings</a>
   {{ end }}
 </nav>
 {{ end }}

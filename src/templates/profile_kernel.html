@@ -13,22 +13,7 @@
 </nav>
 {{ end }}
 
-<div class="page-header">
-  <h2>Profile Kernel</h2>
-  <div class="page-header-actions">
-    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
-    <a href="/profiles" class="btn">Back to Profiles</a>
-  </div>
-</div>
-
-<section class="section-card">
-  <h3>{{ .Profile.Name }}</h3>
-  <p class="muted-text">
-    Current revision: r{{ .Profile.LatestRevision }}
-    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
-  </p>
-  {{ template "profile_nav" . }}
-</section>
+{{ template "profile_header" . }}
 
 <section class="section-card">
   <h3>Kernel Settings</h3>

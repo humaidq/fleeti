@@ -180,4 +180,60 @@ func TestDeviceLifecycleIntegration(t *testing.T) {
 	if _, err := AuthenticateDeviceToken(ctx, token); !errors.Is(err, ErrDeviceTokenNotFound) {
 		t.Fatalf("expected old token to be invalid after re-pair, got %v", err)
 	}
+
+	// Telemetry carrying an available version surfaces on the device.
+	if err := RecordDeviceTelemetry(ctx, TelemetryInput{
+		DeviceID:         deviceID,
+		ReportedVersion:  "1.2.3",
+		AvailableVersion: "1.2.4",
+		UpdateState:      "healthy",
+		PayloadJSON:      `{"available_version":"1.2.4"}`,
+	}); err != nil {
+		t.Fatalf("RecordDeviceTelemetry (available): %v", err)
+	}
+
+	withUpdate, err := GetDeviceByID(ctx, deviceID)
+	if err != nil {
+		t.Fatalf("GetDeviceByID (available): %v", err)
+	}
+
+	if withUpdate.AvailableVersion != "1.2.4" {
+		t.Fatalf("expected available_version 1.2.4, got %q", withUpdate.AvailableVersion)
+	}
+
+	// Queue a force-update command; only one command may be pending at a time.
+	if err := CreateDeviceCommand(ctx, deviceID, "update", "1.2.4", ""); err != nil {
+		t.Fatalf("CreateDeviceCommand (update): %v", err)
+	}
+
+	if err := CreateDeviceCommand(ctx, deviceID, "reboot", "", ""); !errors.Is(err, ErrDeviceCommandPending) {
+		t.Fatalf("expected ErrDeviceCommandPending for a second command, got %v", err)
+	}
+
+	pending, err := ListPendingDeviceCommands(ctx, deviceID)
+	if err != nil {
+		t.Fatalf("ListPendingDeviceCommands: %v", err)
+	}
+
+	if len(pending) != 1 || pending[0].Kind != "update" || pending[0].TargetVersion != "1.2.4" {
+		t.Fatalf("unexpected pending commands: %+v", pending)
+	}
+
+	// The agent acknowledges then completes the command, freeing the pending slot.
+	if err := MarkDeviceCommandResult(ctx, pending[0].ID, deviceID, "succeeded", "installed; rebooting"); err != nil {
+		t.Fatalf("MarkDeviceCommandResult: %v", err)
+	}
+
+	if err := CreateDeviceCommand(ctx, deviceID, "reboot", "", ""); err != nil {
+		t.Fatalf("CreateDeviceCommand (reboot after completion): %v", err)
+	}
+
+	recent, err := ListRecentDeviceCommands(ctx, deviceID, 10)
+	if err != nil {
+		t.Fatalf("ListRecentDeviceCommands: %v", err)
+	}
+
+	if len(recent) != 2 {
+		t.Fatalf("expected 2 recent commands, got %d", len(recent))
+	}
 }

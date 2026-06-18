@@ -17,13 +17,13 @@
   <h2>Release Summary</h2>
   <div class="page-header-actions">
     {{ if .CanManageRelease }}
-    <form method="post" action="{{ if .ReleaseDeletePath }}{{ .ReleaseDeletePath }}{{ else }}/releases/{{ .Release.ID }}/delete{{ end }}" class="inline-form" onsubmit="return confirm('Permanently delete this release and all associated rollouts? This cannot be undone.');">
+    <form method="post" action="{{ .ReleaseDeletePath }}" class="inline-form" onsubmit="return confirm('Permanently delete this release and all associated rollouts? This cannot be undone.');">
       <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn btn-danger">Delete Permanently</button>
     </form>
     {{ end }}
-    <a href="{{ if .ReleaseRolloutsPath }}{{ .ReleaseRolloutsPath }}{{ else }}/rollouts{{ end }}" class="btn">View Rollouts</a>
-    <a href="{{ if .ReleaseBackPath }}{{ .ReleaseBackPath }}{{ else }}/releases{{ end }}" class="btn">Back to Releases</a>
+    <a href="{{ .ReleaseRolloutsPath }}" class="btn">View Rollouts</a>
+    <a href="{{ .ReleaseBackPath }}" class="btn">Back to Releases</a>
   </div>
 </div>
 
@@ -85,7 +85,7 @@
       </a>
     </div>
     <div class="list-card list-card-clickable">
-      <a href="{{ if .ReleaseRolloutsPath }}{{ .ReleaseRolloutsPath }}{{ else }}/rollouts{{ end }}" class="list-card-link list-card-entry-link">
+      <a href="{{ .ReleaseRolloutsPath }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
             <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span>
@@ -106,7 +106,7 @@
   <div class="list-card-list">
     {{ range .RelatedRollouts }}
     <div class="list-card list-card-clickable rollout-list-card">
-      <a href="{{ if $.ReleaseRolloutPathPrefix }}{{ $.ReleaseRolloutPathPrefix }}/{{ .ID }}{{ else }}/rollouts/{{ .ID }}{{ end }}" class="list-card-link list-card-entry-link">
+      <a href="{{ $.ReleaseRolloutPathPrefix }}/{{ .ID }}" class="list-card-link list-card-entry-link">
         <div class="list-card-entry">
           <span class="list-card-leading">
             <span class="list-card-icon" aria-hidden="true"><i class="fa-solid fa-rocket"></i></span>

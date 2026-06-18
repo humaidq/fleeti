@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -132,74 +131,6 @@ func Security(c flamego.Context, s session.Session, t template.Template, data te
 		data["GeneratedAPIKeyLabel"] = generatedAPIKeyLabel
 	}
 
-	isAdmin, err := resolveSessionIsAdmin(ctx, s)
-	if err != nil {
-		logger.Error("failed to resolve admin state", "error", err)
-		isAdmin = false
-	}
-
-	data["IsAdmin"] = isAdmin
-
-	if isAdmin {
-		baseSetupURL := buildExternalURL(c.Request(), "/setup")
-		now := time.Now()
-
-		invites, err := db.ListPendingUserInvites(ctx)
-		if err != nil {
-			logger.Error("failed to load invites", "error", err)
-			data["InviteError"] = "Failed to load user invites"
-		} else {
-			inviteInfos := make([]InviteInfo, 0, len(invites))
-			for _, invite := range invites {
-				displayName := "New user"
-				if invite.DisplayName != nil && strings.TrimSpace(*invite.DisplayName) != "" {
-					displayName = strings.TrimSpace(*invite.DisplayName)
-				}
-
-				expiresAt := invite.CreatedAt.Add(24 * time.Hour)
-				setupURL := baseSetupURL + "?token=" + url.QueryEscape(invite.Token)
-
-				inviteInfos = append(inviteInfos, InviteInfo{
-					ID:          invite.ID.String(),
-					DisplayName: displayName,
-					CreatedAt:   invite.CreatedAt,
-					ExpiresAt:   expiresAt,
-					ExpiresIn:   formatDuration(expiresAt.Sub(now)),
-					IsExpired:   !expiresAt.After(now),
-					SetupURL:    setupURL,
-				})
-			}
-
-			data["UserInvites"] = inviteInfos
-		}
-
-		expiredInvites, expiredErr := db.ListExpiredUserInvites(ctx)
-		if expiredErr != nil {
-			logger.Error("failed to load expired invites", "error", expiredErr)
-			data["InviteError"] = "Failed to load user invites"
-		} else {
-			expiredInviteInfos := make([]InviteInfo, 0, len(expiredInvites))
-			for _, invite := range expiredInvites {
-				displayName := "New user"
-				if invite.DisplayName != nil && strings.TrimSpace(*invite.DisplayName) != "" {
-					displayName = strings.TrimSpace(*invite.DisplayName)
-				}
-
-				expiresAt := invite.CreatedAt.Add(24 * time.Hour)
-				expiredInviteInfos = append(expiredInviteInfos, InviteInfo{
-					ID:          invite.ID.String(),
-					DisplayName: displayName,
-					CreatedAt:   invite.CreatedAt,
-					ExpiresAt:   expiresAt,
-					ExpiresIn:   formatDuration(expiresAt.Sub(now)),
-					IsExpired:   true,
-				})
-			}
-
-			data["ExpiredUserInvites"] = expiredInviteInfos
-		}
-	}
-
 	t.HTML(http.StatusOK, "security")
 }
 
@@ -311,107 +242,6 @@ func DeleteAPIKey(c flamego.Context, s session.Session) {
 	}
 
 	SetSuccessFlash(s, "API key deleted")
-	c.Redirect("/security", http.StatusSeeOther)
-}
-
-// CreateUserInvite generates a new invite token (admin only).
-func CreateUserInvite(c flamego.Context, s session.Session) {
-	ctx := c.Request().Context()
-
-	isAdmin, err := resolveSessionIsAdmin(ctx, s)
-	if err != nil || !isAdmin {
-		SetErrorFlash(s, "Access restricted")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	if err := c.Request().ParseForm(); err != nil {
-		SetErrorFlash(s, "Failed to parse form")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	userID, _ := getSessionUserID(s)
-	displayName := strings.TrimSpace(c.Request().Form.Get("display_name"))
-
-	if _, err := db.CreateUserInvite(ctx, userID, displayName); err != nil {
-		SetErrorFlash(s, "Failed to create invite")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	SetSuccessFlash(s, "Invite created")
-	c.Redirect("/security", http.StatusSeeOther)
-}
-
-// RegenerateUserInvite refreshes an expired invite link (admin only).
-func RegenerateUserInvite(c flamego.Context, s session.Session) {
-	ctx := c.Request().Context()
-
-	isAdmin, err := resolveSessionIsAdmin(ctx, s)
-	if err != nil || !isAdmin {
-		SetErrorFlash(s, "Access restricted")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	inviteID := strings.TrimSpace(c.Param("id"))
-	if inviteID == "" {
-		SetErrorFlash(s, "Missing invite ID")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	if _, err := db.RegenerateExpiredUserInvite(ctx, inviteID); err != nil {
-		switch {
-		case errors.Is(err, db.ErrInviteNotExpired):
-			SetWarningFlash(s, "Invite has not expired yet")
-		default:
-			SetErrorFlash(s, "Failed to regenerate invite")
-		}
-
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	SetSuccessFlash(s, "Invite link regenerated")
-	c.Redirect("/security", http.StatusSeeOther)
-}
-
-// DeleteUserInvite revokes a pending invite (admin only).
-func DeleteUserInvite(c flamego.Context, s session.Session) {
-	ctx := c.Request().Context()
-
-	isAdmin, err := resolveSessionIsAdmin(ctx, s)
-	if err != nil || !isAdmin {
-		SetErrorFlash(s, "Access restricted")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	inviteID := c.Param("id")
-	if inviteID == "" {
-		SetErrorFlash(s, "Missing invite ID")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	if err := db.DeleteUserInvite(ctx, inviteID); err != nil {
-		SetErrorFlash(s, "Failed to revoke invite")
-		c.Redirect("/security", http.StatusSeeOther)
-
-		return
-	}
-
-	SetSuccessFlash(s, "Invite revoked")
 	c.Redirect("/security", http.StatusSeeOther)
 }
 

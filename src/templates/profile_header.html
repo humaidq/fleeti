@@ -1,0 +1,38 @@
+{{ define "profile_header" }}
+<header class="prof-hero">
+  <div class="prof-hero-main">
+    <div class="prof-hero-eyebrow">Profile</div>
+    <h2 class="prof-hero-title">{{ .Profile.Name }}</h2>
+    {{ if .Profile.Description }}
+    <p class="prof-hero-desc">{{ .Profile.Description }}</p>
+    {{ else }}
+    <p class="prof-hero-desc prof-hero-desc-empty">No description provided.</p>
+    {{ end }}
+  </div>
+  <div class="prof-hero-actions">
+    {{ if .CanManageProfile }}
+    <a href="/profiles/{{ .Profile.ID }}/wizard" class="btn prof-btn-primary"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> AI Wizard</a>
+    {{ end }}
+    <a href="/profiles" class="btn">Back</a>
+    {{ if .CanManageProfile }}
+    <form method="post" action="/profiles/{{ .Profile.ID }}/delete" class="inline-form" onsubmit="return confirm('Permanently delete this profile and all associated builds, releases, and rollouts? This cannot be undone.');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn btn-danger" title="Delete permanently" aria-label="Delete permanently"><i class="fa-solid fa-trash" aria-hidden="true"></i></button>
+    </form>
+    {{ end }}
+  </div>
+</header>
+
+<div class="prof-meta">
+  <div class="prof-meta-item">
+    <span class="prof-meta-label">Revision</span>
+    <span class="prof-meta-value"><span class="prof-rev">r{{ .Profile.LatestRevision }}</span>{{ if .Profile.ConfigHash }}<code title="{{ .Profile.ConfigHash }}">{{ printf "%.12s" .Profile.ConfigHash }}</code>{{ end }}</span>
+  </div>
+  <div class="prof-meta-item">
+    <span class="prof-meta-label">Created · UTC</span>
+    <span class="prof-meta-value prof-meta-value-sm">{{ .Profile.CreatedAt }}</span>
+  </div>
+</div>
+
+{{ template "profile_nav" . }}
+{{ end }}

@@ -13,22 +13,7 @@
 </nav>
 {{ end }}
 
-<div class="page-header">
-  <h2>Profile Packages</h2>
-  <div class="page-header-actions">
-    <a href="/profiles/{{ .Profile.ID }}" class="btn">View Summary</a>
-    <a href="/profiles" class="btn">Back to Profiles</a>
-  </div>
-</div>
-
-<section class="section-card">
-  <h3>{{ .Profile.Name }}</h3>
-  <p class="muted-text">
-    Current revision: r{{ .Profile.LatestRevision }}
-    {{ if .Profile.ConfigHash }}<span> - <code>{{ .Profile.ConfigHash }}</code></span>{{ end }}
-  </p>
-  {{ template "profile_nav" . }}
-</section>
+{{ template "profile_header" . }}
 
 <section class="section-card">
   <h3>Search Packages</h3>
@@ -36,7 +21,6 @@
     <div class="form-group">
       <label for="profile-package-search">Search Packages</label>
       <input id="profile-package-search" name="q" class="form-item" value="{{ .PackageSearchQuery }}" placeholder="wayland" />
-      <small class="muted-text">Uses <code>nix-search --channel=unstable --json &lt;term&gt;</code>.</small>
     </div>
     <div class="form-actions">
       <button type="submit" class="btn">Search</button>

@@ -235,12 +235,12 @@
   }
 
   function withLoading(button, fn) {
-    var originalText = button.textContent;
+    var originalHTML = button.innerHTML;
     button.disabled = true;
     button.textContent = button.getAttribute("data-loading-text") || "Working...";
     return fn().finally(function() {
       button.disabled = false;
-      button.textContent = originalText;
+      button.innerHTML = originalHTML;
     });
   }
 

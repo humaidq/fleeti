@@ -45,6 +45,7 @@ const (
 	webauthnInviteAllowedKey    = "webauthn_invite_allowed"
 	webauthnInviteIDKey         = "webauthn_invite_id"
 	webauthnSetupIsAdminKey     = "webauthn_setup_is_admin"
+	webauthnRecoveryUserIDKey   = "webauthn_recovery_user_id"
 )
 
 func init() {
@@ -176,6 +177,7 @@ func SetupForm(c flamego.Context, s session.Session, t template.Template, data t
 	if invite == nil || invite.UsedAt != nil {
 		s.Delete(webauthnInviteAllowedKey)
 		s.Delete(webauthnInviteIDKey)
+		s.Delete(webauthnRecoveryUserIDKey)
 
 		data["Error"] = "Invalid setup link"
 
@@ -186,6 +188,13 @@ func SetupForm(c flamego.Context, s session.Session, t template.Template, data t
 
 	s.Set(webauthnInviteAllowedKey, true)
 	s.Set(webauthnInviteIDKey, invite.ID.String())
+
+	if invite.UserID != nil {
+		s.Set(webauthnRecoveryUserIDKey, invite.UserID.String())
+		data["IsRecovery"] = true
+	} else {
+		s.Delete(webauthnRecoveryUserIDKey)
+	}
 
 	data["BootstrapReady"] = true
 	data["IsInviteSetup"] = true
@@ -236,7 +245,10 @@ func SetupStart(c flamego.Context, s session.Session, web *webauthn.WebAuthn) {
 		}
 	}
 
-	var inviteID string
+	var (
+		inviteID     string
+		recoveryUser *webauthnUser
+	)
 
 	if isInvite {
 		storedInviteID, ok := getInviteID(s)
@@ -260,6 +272,15 @@ func SetupStart(c flamego.Context, s session.Session, web *webauthn.WebAuthn) {
 		}
 
 		inviteID = invite.ID.String()
+
+		if invite.UserID != nil {
+			recoveryUser, err = loadWebAuthnUser(ctx, invite.UserID.String())
+			if err != nil {
+				writeJSONError(c, http.StatusInternalServerError, "failed to load user")
+
+				return
+			}
+		}
 	}
 
 	var request struct {
@@ -273,25 +294,46 @@ func SetupStart(c flamego.Context, s session.Session, web *webauthn.WebAuthn) {
 		return
 	}
 
-	displayName := strings.TrimSpace(request.DisplayName)
-	if displayName == "" {
-		writeJSONError(c, http.StatusBadRequest, "display name is required")
-
-		return
-	}
-
-	userID := uuid.New()
 	label := strings.TrimSpace(request.Label)
 
-	user := newWebAuthnUser(&db.User{
-		ID:          userID,
-		DisplayName: displayName,
-		IsAdmin:     isBootstrap,
-	}, nil)
-
-	options, sessionData, err := web.BeginRegistration(user,
-		webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
+	var (
+		userID       uuid.UUID
+		displayName  string
+		isAdmin      bool
+		user         *webauthnUser
+		registerOpts = []webauthn.RegistrationOption{
+			webauthn.WithResidentKeyRequirement(protocol.ResidentKeyRequirementRequired),
+		}
 	)
+
+	if recoveryUser != nil {
+		// Recovery: re-register a passkey onto the existing account, keeping its
+		// identity and admin status. Exclude any still-registered credentials.
+		userID = recoveryUser.user.ID
+		displayName = recoveryUser.user.DisplayName
+		isAdmin = recoveryUser.user.IsAdmin
+		user = recoveryUser
+		registerOpts = append(registerOpts,
+			webauthn.WithExclusions(webauthn.Credentials(recoveryUser.credentials).CredentialDescriptors()),
+		)
+	} else {
+		displayName = strings.TrimSpace(request.DisplayName)
+		if displayName == "" {
+			writeJSONError(c, http.StatusBadRequest, "display name is required")
+
+			return
+		}
+
+		userID = uuid.New()
+		isAdmin = isBootstrap
+		user = newWebAuthnUser(&db.User{
+			ID:          userID,
+			DisplayName: displayName,
+			IsAdmin:     isAdmin,
+		}, nil)
+	}
+
+	options, sessionData, err := web.BeginRegistration(user, registerOpts...)
 	if err != nil {
 		writeJSONError(c, http.StatusInternalServerError, "failed to start registration")
 
@@ -302,10 +344,14 @@ func SetupStart(c flamego.Context, s session.Session, web *webauthn.WebAuthn) {
 	s.Set(webauthnSetupUserIDKey, userID.String())
 	s.Set(webauthnSetupDisplayNameKey, displayName)
 	s.Set(webauthnSetupLabelKey, label)
-	s.Set(webauthnSetupIsAdminKey, isBootstrap)
+	s.Set(webauthnSetupIsAdminKey, isAdmin)
 
 	if inviteID != "" {
 		s.Set(webauthnInviteIDKey, inviteID)
+	}
+
+	if recoveryUser != nil {
+		s.Set(webauthnRecoveryUserIDKey, userID.String())
 	}
 
 	writeJSON(c, options)
@@ -364,6 +410,41 @@ func SetupFinish(c flamego.Context, s session.Session, web *webauthn.WebAuthn) {
 	var labelPtr *string
 	if label != "" {
 		labelPtr = &label
+	}
+
+	if _, isRecovery := getRecoveryUserID(s); isRecovery {
+		inviteValue, ok := getInviteID(s)
+		if !ok {
+			writeJSONError(c, http.StatusBadRequest, "invite token missing")
+
+			return
+		}
+
+		recoveredUser, err := db.FinalizeRecoveryRegistration(ctx, db.FinalizeRecoveryRegistrationInput{
+			UserID:     userID,
+			InviteID:   inviteValue,
+			Credential: *credential,
+			Label:      labelPtr,
+		})
+		if err != nil {
+			switch {
+			case errors.Is(err, db.ErrInviteInvalidOrUsed):
+				writeJSONError(c, http.StatusBadRequest, "invite is no longer valid")
+			case errors.Is(err, db.ErrUserNotFound):
+				writeJSONError(c, http.StatusBadRequest, "account no longer exists")
+			default:
+				writeJSONError(c, http.StatusInternalServerError, "failed to finalize recovery")
+			}
+
+			return
+		}
+
+		setAuthenticatedSession(s, recoveredUser, time.Now(), true)
+		clearSetupSession(s)
+
+		writeJSON(c, map[string]string{"redirect": "/"})
+
+		return
 	}
 
 	var inviteID *string
@@ -449,6 +530,10 @@ func PasskeyLoginFinish(c flamego.Context, s session.Session, web *webauthn.WebA
 		writeJSONError(c, http.StatusInternalServerError, "failed to update passkey")
 
 		return
+	}
+
+	if err := db.UpdateUserLastLogin(c.Request().Context(), waUser.user.ID.String(), time.Now()); err != nil {
+		logger.Error("failed to record user last login", "user_id", waUser.user.ID.String(), "error", err)
 	}
 
 	rememberLogin := shouldRememberLogin(c.Query("remember"))
@@ -735,6 +820,7 @@ func clearSetupSession(s session.Session) {
 	s.Delete(webauthnInviteAllowedKey)
 	s.Delete(webauthnInviteIDKey)
 	s.Delete(webauthnSetupIsAdminKey)
+	s.Delete(webauthnRecoveryUserIDKey)
 }
 
 func clearRegisterSession(s session.Session) {
@@ -757,6 +843,15 @@ func isInviteAllowed(s session.Session) bool {
 
 func getInviteID(s session.Session) (string, bool) {
 	val, ok := s.Get(webauthnInviteIDKey).(string)
+	if !ok || strings.TrimSpace(val) == "" {
+		return "", false
+	}
+
+	return val, true
+}
+
+func getRecoveryUserID(s session.Session) (string, bool) {
+	val, ok := s.Get(webauthnRecoveryUserIDKey).(string)
 	if !ok || strings.TrimSpace(val) == "" {
 		return "", false
 	}
