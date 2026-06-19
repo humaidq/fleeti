@@ -43,6 +43,13 @@ const (
 	installerImageFileName       = "image.raw"
 	defaultFleetiInstanceBaseURL = "https://admin.fleeti.ae"
 	fleetiInstanceBaseURLEnvVar  = "FLEETI_INSTANCE_BASE_URL"
+
+	// chunkStoreDirName is the shared, content-addressed desync chunk store under
+	// the updates directory (updates/castr). Delta-update chunks from every build
+	// are merged here and served at /update/castr; deduplication across versions
+	// keeps growth to roughly the changed bytes per release.
+	chunkStoreDirName = "castr"
+	desyncBinaryName  = "desync"
 )
 
 var safeUpdatePathSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
@@ -252,6 +259,14 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 	// on the read-only Nix store output, and never inside the Nix build.
 	publishedBuildDir := filepath.Join(updatesDir, updatesArtifactsDirName, buildID)
 	if err := signUpdatePackageDir(ctx, buildID, signScriptPath(workspaceNixOSDir), material, publishedBuildDir); err != nil {
+		return "", err
+	}
+
+	// Chunk the signed UKI for delta updates. This runs after signing because
+	// signing rewrites the UKI bytes; chunking the unsigned UKI inside the Nix
+	// build would index data the device never receives. The nix-store image is
+	// not signed, so its index is produced in the Nix build instead.
+	if err := generateUKIChunkIndexes(ctx, buildID, publishedBuildDir, filepath.Join(updatesDir, chunkStoreDirName)); err != nil {
 		return "", err
 	}
 
@@ -1082,6 +1097,12 @@ func publishBuildArtifacts(resultDir, updatesDir, buildID string) (string, error
 	for _, entry := range entries {
 		name := entry.Name()
 
+		if name == chunkStoreDirName && entry.IsDir() {
+			// The nix-store delta chunk store; merged into the shared store below
+			// rather than copied verbatim into the per-build artifacts directory.
+			continue
+		}
+
 		if !isPublishedUpdateArtifactFileName(name) {
 			logger.Warn("ignoring non-matching build artifact", "file", name)
 
@@ -1122,6 +1143,13 @@ func publishBuildArtifacts(resultDir, updatesDir, buildID string) (string, error
 
 	if len(artifactNames) == 0 {
 		return "", fmt.Errorf("build produced no artifacts matching update naming patterns")
+	}
+
+	// Merge the nix-store chunk store produced by the Nix build into the shared,
+	// content-addressed store served at /update/castr. The UKI chunk index is
+	// produced separately, after Secure Boot signing rewrites the UKI bytes.
+	if err := mergeChunkStore(filepath.Join(resultDir, chunkStoreDirName), filepath.Join(updatesDir, chunkStoreDirName)); err != nil {
+		return "", fmt.Errorf("failed to merge nix-store chunk store: %w", err)
 	}
 
 	sort.Strings(artifactNames)
@@ -1403,8 +1431,10 @@ func activateFleetReleaseArtifacts(updatesDir, fleetID, buildID, releaseVersion 
 // publishedArtifactVersionSuffixes lists the recognised artifact filename
 // suffixes, longest first, so the version segment can be located and replaced.
 var publishedArtifactVersionSuffixes = []string{
+	".nix-store.raw.caibx",
 	".nix-store.raw.xz",
 	".nix-store.raw",
+	".efi.caibx",
 	".efi.xz",
 	".efi",
 }
@@ -1534,6 +1564,185 @@ func copyFile(sourcePath, destinationPath string, mode fs.FileMode) error {
 
 	if _, err := io.Copy(destinationFile, sourceFile); err != nil {
 		return fmt.Errorf("failed to copy file contents: %w", err)
+	}
+
+	return nil
+}
+
+// mergeChunkStore copies chunk files present in srcStore but missing from
+// dstStore into dstStore. desync chunk stores are content-addressed (layout
+// <store>/<aa>/<chunk-id>.cacnk), so a chunk that already exists is byte
+// identical and need not be recopied. Copies are atomic (temp + rename) so a
+// concurrent build publishing into the shared store never observes a partial
+// chunk. A missing srcStore is not an error: a build may produce no chunks.
+func mergeChunkStore(srcStore, dstStore string) error {
+	info, err := os.Stat(srcStore)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to inspect chunk store: %w", err)
+	}
+
+	if !info.IsDir() {
+		return fmt.Errorf("chunk store path is not a directory: %s", srcStore)
+	}
+
+	return filepath.WalkDir(srcStore, func(currentPath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(srcStore, currentPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve chunk relative path: %w", err)
+		}
+
+		destinationPath := filepath.Join(dstStore, relPath)
+		if _, err := os.Stat(destinationPath); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to stat chunk %s: %w", relPath, err)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(destinationPath), 0o750); err != nil {
+			return fmt.Errorf("failed to create chunk store directory: %w", err)
+		}
+
+		if err := copyFileAtomic(currentPath, destinationPath, 0o644); err != nil {
+			return fmt.Errorf("failed to copy chunk %s: %w", relPath, err)
+		}
+
+		return nil
+	})
+}
+
+// copyFileAtomic copies sourcePath to destinationPath via a temporary file in
+// the destination directory, renamed into place so readers never see a partial
+// file.
+func copyFileAtomic(sourcePath, destinationPath string, mode fs.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(destinationPath), ".chunk-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := copyFile(sourcePath, tmpPath, mode); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmpPath, destinationPath); err != nil {
+		return fmt.Errorf("failed to finalize file: %w", err)
+	}
+
+	cleanup = false
+
+	return nil
+}
+
+// generateUKIChunkIndexes produces a delta-update chunk index (*.efi.caibx) for
+// every signed UKI (*.efi.xz) in packageDir, writing the index alongside the
+// artifact and the chunks into the shared store. The UKI is decompressed first
+// because chunking and on-device reconstruction operate on the uncompressed
+// image.
+func generateUKIChunkIndexes(ctx context.Context, buildID, packageDir, globalStore string) error {
+	entries, err := os.ReadDir(packageDir)
+	if err != nil {
+		return fmt.Errorf("failed to read package directory for UKI chunking: %w", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".efi.xz") {
+			continue
+		}
+
+		if err := generateChunkIndexFromCompressed(ctx, buildID, filepath.Join(packageDir, name), globalStore); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func generateChunkIndexFromCompressed(ctx context.Context, buildID, compressedPath, globalStore string) error {
+	base := strings.TrimSuffix(filepath.Base(compressedPath), ".xz")
+	indexPath := filepath.Join(filepath.Dir(compressedPath), base+".caibx")
+
+	tmp, err := os.CreateTemp("", "fleeti-uki-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file for UKI chunking: %w", err)
+	}
+
+	tmpPath := tmp.Name()
+	_ = tmp.Close()
+
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := decompressXZToFile(ctx, compressedPath, tmpPath); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(globalStore, 0o750); err != nil {
+		return fmt.Errorf("failed to create chunk store: %w", err)
+	}
+
+	if err := runDesyncMake(ctx, buildID, indexPath, tmpPath, globalStore); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func decompressXZToFile(ctx context.Context, compressedPath, destinationPath string) error {
+	out, err := os.Create(destinationPath)
+	if err != nil {
+		return fmt.Errorf("failed to create decompressed output: %w", err)
+	}
+
+	defer func() {
+		_ = out.Close()
+	}()
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "xz", "-d", "-c", compressedPath)
+	cmd.Stdout = out
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to decompress %s: %w: %s", filepath.Base(compressedPath), err, strings.TrimSpace(stderr.String()))
+	}
+
+	return nil
+}
+
+func runDesyncMake(ctx context.Context, buildID, indexPath, inputPath, store string) error {
+	var output bytes.Buffer
+	logWriter := newPersistentBuildLogWriter(ctx, buildID, false)
+	defer logWriter.Flush()
+
+	cmd := exec.CommandContext(ctx, desyncBinaryName, "make", "--store", store, indexPath, inputPath)
+	cmd.Stdout = io.MultiWriter(&output, logWriter)
+	cmd.Stderr = cmd.Stdout
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("desync make failed for %s: %w: %s", filepath.Base(indexPath), err, trimBuildOutput(output.String(), 4096))
 	}
 
 	return nil

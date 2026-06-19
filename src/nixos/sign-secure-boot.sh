@@ -136,7 +136,10 @@ sign_update_package() {
   done
 
   # Refresh the checksum manifest so it matches the re-signed artifacts. Bash
-  # globs are sorted, so the manifest order stays deterministic.
+  # globs are sorted, so the manifest order stays deterministic. The manifest
+  # lists only the full (compressed) update artifacts consumed by the legacy
+  # whole-image download path; delta chunk indexes (*.caibx) and the chunk store
+  # are excluded, as they are verified by their own content hashes.
   local manifest tmpmanifest entry name
   manifest="$dir/SHA256SUMS"
   tmpmanifest="$(mktemp)"
@@ -145,6 +148,7 @@ sign_update_package() {
     for entry in *; do
       [ -f "$entry" ] || continue
       [ "$entry" = "SHA256SUMS" ] && continue
+      [[ "$entry" == *.caibx ]] && continue
       sha256sum "$entry"
     done
   ) > "$tmpmanifest"

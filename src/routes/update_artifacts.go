@@ -32,6 +32,7 @@ const (
 var (
 	nixStoreRawArtifactPattern = regexp.MustCompile(`^[^/]+_[^/]+\.nix-store\.raw(\.xz)?$`)
 	ukiArtifactPattern         = regexp.MustCompile(`^[^/]+_[^/]+\.efi(\.xz)?$`)
+	updateIndexArtifactPattern = regexp.MustCompile(`^[^/]+_[^/]+\.(nix-store\.raw|efi)\.caibx$`)
 	fleetIDPathPattern         = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
@@ -147,12 +148,25 @@ func isUpdateArtifactFileName(name string) bool {
 	return nixStoreRawArtifactPattern.MatchString(name) || ukiArtifactPattern.MatchString(name)
 }
 
+// isUpdateIndexFileName reports whether name is a delta-update chunk index
+// (*.caibx). Indexes accompany the full artifacts through publish and rollout
+// but are deliberately excluded from the device-facing SHA256SUMS manifest
+// (isUpdateArtifactFileName): they are verified by their own chunk hashes, and
+// systemd-sysupdate never consumes them.
+func isUpdateIndexFileName(name string) bool {
+	if name == "" || strings.Contains(name, "/") {
+		return false
+	}
+
+	return updateIndexArtifactPattern.MatchString(name)
+}
+
 func isPublishedUpdateArtifactFileName(name string) bool {
 	if name == checksumManifestFileName {
 		return true
 	}
 
-	return isUpdateArtifactFileName(name)
+	return isUpdateArtifactFileName(name) || isUpdateIndexFileName(name)
 }
 
 func renderUpdateChecksumsForDirectory(updatesDir string) ([]byte, error) {

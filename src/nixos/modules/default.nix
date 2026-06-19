@@ -26,6 +26,7 @@ in
     ./build-overrides.nix
     ./openclaw-microvm.nix
     ./fleeti-admind.nix
+    ./fleeti-update.nix
     ./update.nix
     ./update-package.nix
   ];

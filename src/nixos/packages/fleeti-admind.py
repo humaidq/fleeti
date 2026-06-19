@@ -195,6 +195,7 @@ class Agent:
         self.update_check_interval = env_int("FLEETI_ADMIND_UPDATE_CHECK_INTERVAL", 900)
         self.sysupdate = env("FLEETI_SYSTEMD_SYSUPDATE")
         self.systemctl = env("FLEETI_SYSTEMCTL")
+        self.fleeti_update = env("FLEETI_UPDATE")
 
         self.machine_id = read_machine_id()
         self.state_path = os.path.join(self.state_dir, "state.json")
@@ -499,6 +500,34 @@ class Agent:
             self.report_command(command_id, "failed", "Unknown command kind: %s" % kind)
 
     def run_update(self, target):
+        # Prefer the delta updater: it reconstructs the target image from chunks
+        # already on the device plus the few changed chunks, then hands off to
+        # systemd-sysupdate to apply locally. On any failure fall back to the
+        # full-image download path so updates still complete.
+        if self.fleeti_update:
+            returncode, output = self.run_delta_update(target)
+            if returncode == 0:
+                return 0, ""
+            self.last_error = "delta update failed; falling back to full download: %s" % output
+
+        return self.run_full_update(target)
+
+    def run_delta_update(self, target):
+        args = [self.fleeti_update]
+        if target:
+            args.append(target)
+
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True, timeout=3600, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 1, "delta update failed: %s" % exc
+
+        if proc.returncode != 0:
+            return proc.returncode, (proc.stderr.strip() or proc.stdout.strip() or "delta update failed")
+
+        return 0, ""
+
+    def run_full_update(self, target):
         if not self.sysupdate:
             return 1, "systemd-sysupdate is not configured"
 

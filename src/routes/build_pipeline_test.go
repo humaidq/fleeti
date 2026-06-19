@@ -772,3 +772,202 @@ func TestWriteBuildOverridesModuleConfiguresSecurityHardening(t *testing.T) {
 		t.Fatalf("expected normalized website blocking categories, got: %s", generated)
 	}
 }
+
+func TestUpdateArtifactPredicatesClassifyIndexes(t *testing.T) {
+	t.Parallel()
+
+	rawIndex := "fleeti_v1.2.3.nix-store.raw.caibx"
+	ukiIndex := "fleeti_v1.2.3.efi.caibx"
+
+	// Indexes are publishable (copied + rolled out) but are NOT device-facing
+	// update artifacts, so they never enter the SHA256SUMS manifest.
+	for _, name := range []string{rawIndex, ukiIndex} {
+		if !isUpdateIndexFileName(name) {
+			t.Fatalf("expected %q to be recognised as an index", name)
+		}
+
+		if !isPublishedUpdateArtifactFileName(name) {
+			t.Fatalf("expected %q to be a published artifact", name)
+		}
+
+		if isUpdateArtifactFileName(name) {
+			t.Fatalf("expected index %q to be excluded from the device manifest", name)
+		}
+	}
+
+	// Full artifacts remain device-facing.
+	for _, name := range []string{"fleeti_v1.2.3.nix-store.raw.xz", "fleeti_v1.2.3.efi.xz"} {
+		if isUpdateIndexFileName(name) {
+			t.Fatalf("expected %q not to be classified as an index", name)
+		}
+
+		if !isUpdateArtifactFileName(name) {
+			t.Fatalf("expected %q to remain a device artifact", name)
+		}
+	}
+}
+
+func TestPublishBuildArtifactsCopiesIndexAndMergesChunkStore(t *testing.T) {
+	t.Parallel()
+
+	resultDir := t.TempDir()
+	updatesDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.nix-store.raw.xz"), []byte("raw"), 0o444); err != nil {
+		t.Fatalf("failed to create raw artifact: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(resultDir, "fleeti_v1.2.3.nix-store.raw.caibx"), []byte("index"), 0o444); err != nil {
+		t.Fatalf("failed to create index artifact: %v", err)
+	}
+
+	// A desync chunk store laid out as <store>/<aa>/<chunk>.cacnk.
+	chunkDir := filepath.Join(resultDir, chunkStoreDirName, "ab")
+	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
+		t.Fatalf("failed to create chunk dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(chunkDir, "abcd.cacnk"), []byte("chunk"), 0o444); err != nil {
+		t.Fatalf("failed to create chunk: %v", err)
+	}
+
+	artifactURL, err := publishBuildArtifacts(resultDir, updatesDir, "build-1")
+	if err != nil {
+		t.Fatalf("publishBuildArtifacts returned error: %v", err)
+	}
+
+	// The full image remains the primary artifact even with an index present.
+	if artifactURL != "/update/artifacts/build-1/fleeti_v1.2.3.nix-store.raw.xz" {
+		t.Fatalf("unexpected primary artifact URL: %s", artifactURL)
+	}
+
+	publishedDir := filepath.Join(updatesDir, updatesArtifactsDirName, "build-1")
+	if _, err := os.Stat(filepath.Join(publishedDir, "fleeti_v1.2.3.nix-store.raw.caibx")); err != nil {
+		t.Fatalf("expected index to be published: %v", err)
+	}
+
+	// The chunk store is merged into the shared store, not copied into the build dir.
+	if _, err := os.Stat(filepath.Join(publishedDir, chunkStoreDirName)); !os.IsNotExist(err) {
+		t.Fatalf("expected no chunk store in build dir, stat err: %v", err)
+	}
+
+	mergedChunk := filepath.Join(updatesDir, chunkStoreDirName, "ab", "abcd.cacnk")
+	contents, err := os.ReadFile(mergedChunk)
+	if err != nil {
+		t.Fatalf("expected chunk merged into shared store: %v", err)
+	}
+
+	if string(contents) != "chunk" {
+		t.Fatalf("unexpected merged chunk contents: %q", contents)
+	}
+}
+
+func TestMergeChunkStoreSkipsExistingChunks(t *testing.T) {
+	t.Parallel()
+
+	srcStore := t.TempDir()
+	dstStore := t.TempDir()
+
+	// Existing, content-addressed chunk: identical path implies identical bytes,
+	// so a re-publish must not overwrite it.
+	if err := os.MkdirAll(filepath.Join(dstStore, "ab"), 0o750); err != nil {
+		t.Fatalf("failed to seed dst store: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dstStore, "ab", "existing.cacnk"), []byte("original"), 0o644); err != nil {
+		t.Fatalf("failed to write existing chunk: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(srcStore, "ab"), 0o750); err != nil {
+		t.Fatalf("failed to seed src store: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(srcStore, "ab", "existing.cacnk"), []byte("should-not-overwrite"), 0o644); err != nil {
+		t.Fatalf("failed to write src existing chunk: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(srcStore, "ab", "fresh.cacnk"), []byte("new"), 0o644); err != nil {
+		t.Fatalf("failed to write fresh chunk: %v", err)
+	}
+
+	if err := mergeChunkStore(srcStore, dstStore); err != nil {
+		t.Fatalf("mergeChunkStore returned error: %v", err)
+	}
+
+	existing, err := os.ReadFile(filepath.Join(dstStore, "ab", "existing.cacnk"))
+	if err != nil {
+		t.Fatalf("failed to read existing chunk: %v", err)
+	}
+
+	if string(existing) != "original" {
+		t.Fatalf("existing chunk was overwritten: %q", existing)
+	}
+
+	fresh, err := os.ReadFile(filepath.Join(dstStore, "ab", "fresh.cacnk"))
+	if err != nil {
+		t.Fatalf("expected fresh chunk to be copied: %v", err)
+	}
+
+	if string(fresh) != "new" {
+		t.Fatalf("unexpected fresh chunk contents: %q", fresh)
+	}
+}
+
+func TestMergeChunkStoreToleratesMissingSource(t *testing.T) {
+	t.Parallel()
+
+	dstStore := t.TempDir()
+	if err := mergeChunkStore(filepath.Join(t.TempDir(), "does-not-exist"), dstStore); err != nil {
+		t.Fatalf("mergeChunkStore on missing source returned error: %v", err)
+	}
+}
+
+func TestActivateFleetReleaseArtifactsRenamesIndexes(t *testing.T) {
+	t.Parallel()
+
+	resultDir := t.TempDir()
+	updatesDir := t.TempDir()
+	fleetID := "11111111-1111-1111-1111-111111111111"
+
+	files := []string{
+		"fleeti_v1.2.3.nix-store.raw.xz",
+		"fleeti_v1.2.3.nix-store.raw.caibx",
+		"fleeti_v1.2.3.efi.xz",
+		"fleeti_v1.2.3.efi.caibx",
+	}
+	for _, name := range files {
+		if err := os.WriteFile(filepath.Join(resultDir, name), []byte("data"), 0o444); err != nil {
+			t.Fatalf("failed to create %s: %v", name, err)
+		}
+	}
+
+	if _, err := publishBuildArtifacts(resultDir, updatesDir, "build-1"); err != nil {
+		t.Fatalf("publishBuildArtifacts returned error: %v", err)
+	}
+
+	if err := activateFleetReleaseArtifacts(updatesDir, fleetID, "build-1", "v2.0.0"); err != nil {
+		t.Fatalf("activateFleetReleaseArtifacts returned error: %v", err)
+	}
+
+	fleetDir := filepath.Join(updatesDir, fleetID)
+	for _, expected := range []string{"fleeti_v2.0.0.nix-store.raw.caibx", "fleeti_v2.0.0.efi.caibx"} {
+		if _, err := os.Stat(filepath.Join(fleetDir, expected)); err != nil {
+			t.Fatalf("expected renamed index %s: %v", expected, err)
+		}
+	}
+}
+
+func TestRenameArtifactToReleaseVersionRenamesIndexes(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"fleeti_v1.2.3.nix-store.raw.caibx": "fleeti_v2.0.0.nix-store.raw.caibx",
+		"fleeti_v1.2.3.efi.caibx":           "fleeti_v2.0.0.efi.caibx",
+	}
+
+	for artifact, want := range cases {
+		if got := renameArtifactToReleaseVersion(artifact, "v2.0.0"); got != want {
+			t.Fatalf("renameArtifactToReleaseVersion(%q) = %q, want %q", artifact, got, want)
+		}
+	}
+}
