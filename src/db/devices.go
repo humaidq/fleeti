@@ -222,6 +222,31 @@ func UpdateDevice(ctx context.Context, id string, input UpdateDeviceInput) error
 	return nil
 }
 
+// DeleteDevice removes a device and everything tied to it. The device's token,
+// telemetry, and command rows are dropped by ON DELETE CASCADE, so the laptop's
+// next telemetry/command call is rejected (401) and the agent unpairs itself.
+func DeleteDevice(ctx context.Context, deviceID string) error {
+	if pool == nil {
+		return ErrDatabaseConnectionNotInitialized
+	}
+
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return ErrDeviceNotFound
+	}
+
+	command, err := pool.Exec(ctx, `DELETE FROM devices WHERE id::text = $1`, deviceID)
+	if err != nil {
+		return fmt.Errorf("failed to delete device: %w", err)
+	}
+
+	if command.RowsAffected() == 0 {
+		return ErrDeviceNotFound
+	}
+
+	return nil
+}
+
 // ListDeviceTelemetry returns the most recent telemetry samples for a device.
 func ListDeviceTelemetry(ctx context.Context, deviceID string, limit int) ([]DeviceTelemetryRecord, error) {
 	if pool == nil {

@@ -3036,6 +3036,31 @@ func DeviceReboot(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Reboot queued. The device will reboot shortly.")
 }
 
+// DeleteDevice removes a device from the fleet. Its token is dropped along with
+// the row, so the laptop's next check-in is rejected and the agent unpairs itself.
+func DeleteDevice(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
+
+		return
+	}
+
+	if _, err := resolveSessionUser(c.Request().Context(), s); err != nil {
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
+
+		return
+	}
+
+	if err := db.DeleteDevice(c.Request().Context(), deviceID); err != nil {
+		handleMutationError(c, s, "/devices", err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices", FlashSuccess, "Device deleted. The laptop will unpair itself on its next check-in.")
+}
+
 func markRolloutFailed(ctx context.Context, rolloutID string) {
 	if err := db.UpdateRolloutStatus(ctx, rolloutID, db.RolloutStatusFailed); err != nil {
 		logger.Error("failed to mark rollout as failed", "rollout_id", rolloutID, "error", err)

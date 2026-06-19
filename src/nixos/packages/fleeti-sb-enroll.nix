@@ -7,6 +7,7 @@
 # PK/KEK/db .auth payloads injected onto the ESP at build time.
 {
   coreutils,
+  e2fsprogs,
   efitools,
   writeShellApplication,
 }:
@@ -16,6 +17,7 @@ writeShellApplication {
 
   runtimeInputs = [
     coreutils
+    e2fsprogs
     efitools
   ];
 
@@ -53,6 +55,13 @@ writeShellApplication {
     # setup mode and enables Secure Boot enforcement.
     for var in db KEK PK; do
       echo "fleeti-sb-enroll: enrolling $var"
+      # efivarfs marks existing variable files immutable; clear the flag first or
+      # the write fails with EPERM ("operation not permitted"). A brand-new variable
+      # in setup mode may not have a file yet, so only act when it exists.
+      var_path="$efivars/$var-$efi_guid"
+      if [ -e "$var_path" ]; then
+        chattr -i "$var_path" 2>/dev/null || true
+      fi
       efi-updatevar -f "$keys_dir/$var.auth" "$var"
     done
 

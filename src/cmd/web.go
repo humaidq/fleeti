@@ -288,6 +288,7 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Post("/devices/{id}/edit", csrf.Validate, routes.UpdateDevice)
 		f.Post("/devices/{id}/force-update", csrf.Validate, routes.DeviceForceUpdate)
 		f.Post("/devices/{id}/reboot", csrf.Validate, routes.DeviceReboot)
+		f.Post("/devices/{id}/delete", csrf.Validate, routes.DeleteDevice)
 	}, routes.RequireAuth)
 
 	port := cmd.String("port")

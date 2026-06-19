@@ -236,4 +236,37 @@ func TestDeviceLifecycleIntegration(t *testing.T) {
 	if len(recent) != 2 {
 		t.Fatalf("expected 2 recent commands, got %d", len(recent))
 	}
+
+	// Resolve the current token so we can confirm deletion revokes it.
+	enr4, err := StartEnrollment(ctx, StartEnrollmentInput{FleetID: fleetID, MachineID: machineID, Hostname: "host-" + suffix, Version: "1"})
+	if err != nil {
+		t.Fatalf("StartEnrollment (pre-delete): %v", err)
+	}
+
+	if _, err := ClaimEnrollmentCode(ctx, enr4.Code, ""); err != nil {
+		t.Fatalf("ClaimEnrollmentCode (pre-delete): %v", err)
+	}
+
+	_, _, liveToken, err := PollEnrollment(ctx, enr4.Code, machineID)
+	if err != nil || liveToken == "" {
+		t.Fatalf("PollEnrollment (pre-delete): token=%q err=%v", liveToken, err)
+	}
+
+	// Deleting the device removes the row and cascades to its token, so the
+	// laptop's next check-in is rejected (401) and the agent unpairs itself.
+	if err := DeleteDevice(ctx, deviceID); err != nil {
+		t.Fatalf("DeleteDevice: %v", err)
+	}
+
+	if _, err := GetDeviceByID(ctx, deviceID); !errors.Is(err, ErrDeviceNotFound) {
+		t.Fatalf("expected ErrDeviceNotFound after delete, got %v", err)
+	}
+
+	if _, err := AuthenticateDeviceToken(ctx, liveToken); !errors.Is(err, ErrDeviceTokenNotFound) {
+		t.Fatalf("expected token revoked after delete, got %v", err)
+	}
+
+	if err := DeleteDevice(ctx, deviceID); !errors.Is(err, ErrDeviceNotFound) {
+		t.Fatalf("expected ErrDeviceNotFound deleting twice, got %v", err)
+	}
 }

@@ -224,4 +224,14 @@
   {{ end }}
 </section>
 
+<section class="section-card">
+  <h3>Danger Zone</h3>
+  <p class="muted-text">Deleting this device removes its record and revokes its token. The laptop unpairs itself on its next check-in and returns to the pairing screen.</p>
+  <form method="post" action="/devices/{{ .Device.ID }}/delete" class="inline-form"
+    onsubmit="return confirm('Delete this device? The laptop will unpair itself and return to the pairing screen.');">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+    <button type="submit" class="btn btn-danger">Unpair &amp; Delete Device</button>
+  </form>
+</section>
+
 {{ template "foot" . }}
