@@ -34,6 +34,7 @@
                 util-linux
                 jq
                 xz
+                desync
                 ;
             }
             ++ [

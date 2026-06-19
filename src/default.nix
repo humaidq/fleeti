@@ -31,17 +31,20 @@ pkgs.buildGoModule rec {
   # (systemd service, `nix run`, etc.).
   postFixup = ''
     wrapProgram "$out/bin/fleeti" \
-      --prefix PATH : "${lib.makeBinPath [
-        pkgs.nix-search-cli
-        # Post-build Secure Boot signing (sign-secure-boot.sh runs outside Nix).
-        pkgs.bash
-        pkgs.coreutils
-        pkgs.sbsigntool # sbsign, sbverify
-        pkgs.efitools # cert-to-efi-sig-list, sign-efi-sig-list
-        pkgs.mtools # mcopy, mdir, mmd
-        pkgs.util-linux # sfdisk
-        pkgs.jq
-        pkgs.xz
-      ]}"
+      --prefix PATH : "${
+        lib.makeBinPath [
+          pkgs.nix-search-cli
+          # Post-build Secure Boot signing (sign-secure-boot.sh runs outside Nix).
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.sbsigntool # sbsign, sbverify
+          pkgs.efitools # cert-to-efi-sig-list, sign-efi-sig-list
+          pkgs.mtools # mcopy, mdir, mmd
+          pkgs.util-linux # sfdisk
+          pkgs.jq
+          pkgs.xz
+          pkgs.desync # delta-update chunk index for the signed UKI
+        ]
+      }"
   '';
 }
