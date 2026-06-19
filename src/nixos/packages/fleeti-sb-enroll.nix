@@ -24,7 +24,11 @@ writeShellApplication {
   text = ''
     keys_dir="''${FLEETI_SB_KEYS_DIR:-/boot/loader/keys/auto}"
     efivars="/sys/firmware/efi/efivars"
+    # PK/KEK live under the EFI global variable GUID; db/dbx live under the EFI
+    # image security database GUID. efivarfs names files "<var>-<guid>", so the
+    # right GUID per variable matters when clearing the immutable flag below.
     efi_guid="8be4df61-93ca-11d2-aa0d-00e098032b8c"
+    sec_db_guid="d719b2cb-3d3a-4596-a3bc-dad00e67656f"
 
     # Read the single value byte of an EFI variable (after the 4 attribute bytes).
     read_efivar_bool() {
@@ -58,9 +62,13 @@ writeShellApplication {
       # efivarfs marks existing variable files immutable; clear the flag first or
       # the write fails with EPERM ("operation not permitted"). A brand-new variable
       # in setup mode may not have a file yet, so only act when it exists.
-      var_path="$efivars/$var-$efi_guid"
+      case "$var" in
+        db | dbx) var_guid="$sec_db_guid" ;;
+        *) var_guid="$efi_guid" ;;
+      esac
+      var_path="$efivars/$var-$var_guid"
       if [ -e "$var_path" ]; then
-        chattr -i "$var_path" 2>/dev/null || true
+        chattr -i "$var_path"
       fi
       efi-updatevar -f "$keys_dir/$var.auth" "$var"
     done
