@@ -32,6 +32,7 @@ in
         # the build server merges it into the global store, deduplicating across
         # versions. The .efi (UKI) index is produced post-build in Fleeti Web,
         # after the UKI is Secure Boot signed (signing rewrites its bytes).
+        mkdir -p $out/castr
         desync make --store $out/castr \
           $out/${id}_${version}.nix-store.raw.caibx \
           ${build.image}/${id}_${version}.nix-store.raw
