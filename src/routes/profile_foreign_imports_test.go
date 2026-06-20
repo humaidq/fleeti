@@ -22,6 +22,8 @@ func TestPinnedForeignFlakeRef(t *testing.T) {
 	}{
 		{"github:acme/mods", "github:acme/mods/" + testForeignRev},
 		{"github:acme/mods/main", "github:acme/mods/" + testForeignRev},
+		{"github:org/mono?dir=nixos", "github:org/mono/" + testForeignRev + "?dir=nixos"},
+		{"github:org/mono/main?dir=nixos", "github:org/mono/" + testForeignRev + "?dir=nixos"},
 		{"gitlab:acme/mods", "gitlab:acme/mods/" + testForeignRev},
 		{"git+https://git.example.com/team/mods", "git+https://git.example.com/team/mods?rev=" + testForeignRev},
 		{"git+https://git.example.com/team/mods?ref=main", "git+https://git.example.com/team/mods?ref=main&rev=" + testForeignRev},
