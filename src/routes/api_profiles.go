@@ -495,6 +495,7 @@ func buildAPIProfileMutationInput(ctx context.Context, profile db.ProfileEdit, c
 		Description:         profile.Description,
 		ConfigJSON:          configJSON,
 		RawNix:              rawNix,
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: configSchemaVersion,
 	}, nil
 }

@@ -390,6 +390,12 @@ func ProfileWizardApply(c flamego.Context, s session.Session) {
 			redirectPath = profileViewPath(createdProfileID)
 		}
 	} else {
+		// Preserve any external flake imports the profile already has; the wizard
+		// draft does not model them, so without this an update would drop them.
+		if existing, existingErr := db.GetProfileForEdit(ctx, profileID); existingErr == nil {
+			input.ForeignImports = existing.ForeignImports
+		}
+
 		if _, err := db.UpdateProfile(ctx, profileID, input); err != nil {
 			writeProfileWizardMutationError(c, err)
 

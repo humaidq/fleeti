@@ -28,21 +28,22 @@ import (
 )
 
 const (
-	nixosSourceDirName           = "nixos"
-	updatesDirName               = "updates"
-	updatesArtifactsDirName      = "artifacts"
-	installerArtifactsDir        = "installer"
-	buildOverridesPath           = "modules/build-overrides.nix"
-	kernelPatchesDirPath         = "modules/kernel-patches"
-	profileRawNixModulePath      = "modules/profile-raw-nix.nix"
-	buildLogFlushSize            = 4096
-	updateBuildTarget            = ".#fleeti-update"
-	installerBuildTarget         = ".#fleeti-installer"
-	imageBuildTarget             = ".#fleeti-image"
-	installerImageDirName        = "installer-image"
-	installerImageFileName       = "image.raw"
-	defaultFleetiInstanceBaseURL = "https://admin.fleeti.ae"
-	fleetiInstanceBaseURLEnvVar  = "FLEETI_INSTANCE_BASE_URL"
+	nixosSourceDirName              = "nixos"
+	updatesDirName                  = "updates"
+	updatesArtifactsDirName         = "artifacts"
+	installerArtifactsDir           = "installer"
+	buildOverridesPath              = "modules/build-overrides.nix"
+	kernelPatchesDirPath            = "modules/kernel-patches"
+	profileRawNixModulePath         = "modules/profile-raw-nix.nix"
+	profileForeignImportsModulePath = "modules/profile-foreign-imports.nix"
+	buildLogFlushSize               = 4096
+	updateBuildTarget               = ".#fleeti-update"
+	installerBuildTarget            = ".#fleeti-installer"
+	imageBuildTarget                = ".#fleeti-image"
+	installerImageDirName           = "installer-image"
+	installerImageFileName          = "image.raw"
+	defaultFleetiInstanceBaseURL    = "https://admin.fleeti.ae"
+	fleetiInstanceBaseURLEnvVar     = "FLEETI_INSTANCE_BASE_URL"
 
 	// chunkStoreDirName is the shared, content-addressed desync chunk store under
 	// the updates directory (updates/castr). Delta-update chunks from every build
@@ -206,27 +207,27 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
-	profileConfigJSON, rawNix, fleetID, profileID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	meta, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
 
-	packages, err := packagesFromProfileConfig(profileConfigJSON)
+	packages, err := packagesFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile packages: %w", err)
 	}
 
-	kernelConfig, err := profileKernelConfigFromProfileConfig(profileConfigJSON)
+	kernelConfig, err := profileKernelConfigFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile kernel config: %w", err)
 	}
 
-	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profileConfigJSON)
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile openclaw microvm setting: %w", err)
 	}
 
-	securityConfig, err := profileSecurityConfigFromProfileConfig(profileConfigJSON)
+	securityConfig, err := profileSecurityConfigFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile security config: %w", err)
 	}
@@ -235,16 +236,26 @@ func runBuildAndPublishUpdate(ctx context.Context, buildID, buildVersion string)
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
 	}
 
-	material, err := ensureProfileSecureBootMaterial(profileID, "")
+	if err := db.ValidateForeignImports(meta.ForeignImports); err != nil {
+		return "", fmt.Errorf("invalid profile foreign imports: %w", err)
+	}
+
+	authArgs, authCleanup, err := nixAuthArgs(meta.ForeignImports, workspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	defer authCleanup()
+
+	material, err := ensureProfileSecureBootMaterial(meta.ProfileID, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare secure boot key material: %w", err)
 	}
 
-	if err := writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, rawNix); err != nil {
+	if err := writeBuildOverridesModule(workspaceNixOSDir, buildVersion, meta.FleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, meta.RawNix, meta.ForeignImports); err != nil {
 		return "", err
 	}
 
-	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, updateBuildTarget, false); err != nil {
+	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, updateBuildTarget, false, authArgs); err != nil {
 		return "", err
 	}
 
@@ -288,27 +299,27 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", db.ErrBuildNotReadyForInstaller
 	}
 
-	profileConfigJSON, rawNix, fleetID, profileID, err := db.GetBuildExecutionMetadata(ctx, buildID)
+	meta, err := db.GetBuildExecutionMetadata(ctx, buildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to load build profile configuration: %w", err)
 	}
 
-	packages, err := packagesFromProfileConfig(profileConfigJSON)
+	packages, err := packagesFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile packages: %w", err)
 	}
 
-	kernelConfig, err := profileKernelConfigFromProfileConfig(profileConfigJSON)
+	kernelConfig, err := profileKernelConfigFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile kernel config: %w", err)
 	}
 
-	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(profileConfigJSON)
+	openclawMicroVMEnabled, err := openclawMicrovmEnabledFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile openclaw microvm setting: %w", err)
 	}
 
-	securityConfig, err := profileSecurityConfigFromProfileConfig(profileConfigJSON)
+	securityConfig, err := profileSecurityConfigFromProfileConfig(meta.ConfigJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse profile security config: %w", err)
 	}
@@ -317,7 +328,11 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", fmt.Errorf("invalid profile kernel config: %w", err)
 	}
 
-	material, err := ensureProfileSecureBootMaterial(profileID, "")
+	if err := db.ValidateForeignImports(meta.ForeignImports); err != nil {
+		return "", fmt.Errorf("invalid profile foreign imports: %w", err)
+	}
+
+	material, err := ensureProfileSecureBootMaterial(meta.ProfileID, "")
 	if err != nil {
 		return "", fmt.Errorf("failed to prepare secure boot key material: %w", err)
 	}
@@ -343,7 +358,13 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", fmt.Errorf("failed to copy nixos workspace: %w", err)
 	}
 
-	if err := writeBuildOverridesModule(workspaceNixOSDir, build.Version, fleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, rawNix); err != nil {
+	authArgs, authCleanup, err := nixAuthArgs(meta.ForeignImports, workspaceRoot)
+	if err != nil {
+		return "", err
+	}
+	defer authCleanup()
+
+	if err := writeBuildOverridesModule(workspaceNixOSDir, build.Version, meta.FleetID, packages, kernelConfig, securityConfig, openclawMicroVMEnabled, meta.RawNix, meta.ForeignImports); err != nil {
 		return "", err
 	}
 
@@ -351,7 +372,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 	// keys) outside Nix, then build the installer ISO which sources the signed
 	// image from the workspace (see mk-fleeti-installer.nix). This keeps the
 	// private key out of Nix while ensuring the flashed system is signed.
-	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, imageBuildTarget, true); err != nil {
+	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, imageBuildTarget, true, authArgs); err != nil {
 		return "", err
 	}
 
@@ -364,7 +385,7 @@ func runBuildAndPublishInstaller(ctx context.Context, buildID string) (string, e
 		return "", err
 	}
 
-	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, installerBuildTarget, true); err != nil {
+	if err := runNixBuildCommand(ctx, buildID, workspaceNixOSDir, installerBuildTarget, true, authArgs); err != nil {
 		return "", err
 	}
 
@@ -623,13 +644,17 @@ func ensureOwnerWritableMode(mode fs.FileMode, isDir bool) fs.FileMode {
 	return mode
 }
 
-func runNixBuildCommand(ctx context.Context, buildID, workspaceNixOSDir, buildTarget string, installerLogs bool) error {
+func runNixBuildCommand(ctx context.Context, buildID, workspaceNixOSDir, buildTarget string, installerLogs bool, extraArgs []string) error {
 	buildTarget = strings.TrimSpace(buildTarget)
 	if buildTarget == "" {
 		return fmt.Errorf("build target is required")
 	}
 
-	cmd := exec.Command("nix", "build", "--option", "builders", "", buildTarget)
+	args := []string{"build", "--option", "builders", ""}
+	args = append(args, extraArgs...)
+	args = append(args, buildTarget)
+
+	cmd := exec.Command("nix", args...)
 	cmd.Dir = workspaceNixOSDir
 
 	var output bytes.Buffer
@@ -704,7 +729,7 @@ func (w *persistentBuildLogWriter) flushLocked() {
 	}
 }
 
-func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, packages []string, kernelConfig ProfileKernelConfig, securityConfig ProfileSecurityConfig, openclawMicroVMEnabled bool, rawNix string) error {
+func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, packages []string, kernelConfig ProfileKernelConfig, securityConfig ProfileSecurityConfig, openclawMicroVMEnabled bool, rawNix string, foreignImports []db.ForeignImport) error {
 	packageExpressions, err := buildPackageExpressions(packages)
 	if err != nil {
 		return fmt.Errorf("failed to build package expressions: %w", err)
@@ -744,11 +769,16 @@ func writeBuildOverridesModule(workspaceNixOSDir, buildVersion, fleetID string, 
 		return err
 	}
 
+	if err := writeProfileForeignImportsModule(workspaceNixOSDir, foreignImports); err != nil {
+		return err
+	}
+
 	overridesModulePath := filepath.Join(workspaceNixOSDir, buildOverridesPath)
 	overridesModuleBody := fmt.Sprintf(`{ config, lib, pkgs, ... }:
 {
 	imports = [
 		./profile-raw-nix.nix
+		./profile-foreign-imports.nix
 	];
 
 	system.image.version = "%s";
@@ -818,6 +848,54 @@ func writeProfileRawNixModule(workspaceNixOSDir, rawNix string) error {
 
 	if err := os.WriteFile(rawNixModulePath, []byte(rawNix), 0o640); err != nil {
 		return fmt.Errorf("failed to write profile raw nix module: %w", err)
+	}
+
+	return nil
+}
+
+// writeProfileForeignImportsModule generates the NixOS module that pulls the
+// selected modules from each external flake. Each flake is fetched with
+// builtins.getFlake at its pinned commit, keeping the build pure. When there are
+// no foreign imports the stub `_: { }` is written, matching the raw-nix module.
+func writeProfileForeignImportsModule(workspaceNixOSDir string, foreignImports []db.ForeignImport) error {
+	modulePath := filepath.Join(workspaceNixOSDir, profileForeignImportsModulePath)
+
+	foreignImports = db.NormalizeForeignImports(foreignImports)
+
+	body := "_: { }\n"
+	if len(foreignImports) > 0 {
+		var letLines []string
+		var importLines []string
+
+		for index, item := range foreignImports {
+			binding := fmt.Sprintf("flake%d", index)
+			pinnedRef, err := pinnedForeignFlakeRef(item.FlakeRef, item.Rev)
+			if err != nil {
+				return err
+			}
+
+			letLines = append(letLines, fmt.Sprintf("  %s = builtins.getFlake \"%s\";", binding, escapeNixString(pinnedRef)))
+
+			for _, module := range item.Modules {
+				importLines = append(importLines, fmt.Sprintf("    %s.nixosModules.\"%s\"", binding, escapeNixString(module)))
+			}
+		}
+
+		body = fmt.Sprintf(`# Generated by Fleeti. Do not edit.
+{ ... }:
+let
+%s
+in
+{
+  imports = [
+%s
+  ];
+}
+`, strings.Join(letLines, "\n"), strings.Join(importLines, "\n"))
+	}
+
+	if err := os.WriteFile(modulePath, []byte(body), 0o640); err != nil {
+		return fmt.Errorf("failed to write profile foreign imports module: %w", err)
 	}
 
 	return nil

@@ -1,0 +1,103 @@
+{{ template "head" . }}
+
+{{ if .Breadcrumbs }}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  {{ range $i, $b := .Breadcrumbs }}
+    {{ if $i }}<span class="breadcrumb-separator">&gt;</span>{{ end }}
+    {{ if $b.IsCurrent }}
+      <span class="breadcrumb-current">{{ $b.Name }}</span>
+    {{ else }}
+      <a href="{{ $b.URL }}" class="breadcrumb-item">{{ $b.Name }}</a>
+    {{ end }}
+  {{ end }}
+</nav>
+{{ end }}
+
+{{ template "profile_header" . }}
+
+<section class="section-card">
+  <h3>External Flake Modules</h3>
+  <p class="muted-text">
+    Add NixOS modules from external flakes — including your own private repositories —
+    and select which modules to import into this profile's image. Flakes are pinned to a
+    specific commit for reproducible builds; use <strong>Update</strong> to move to the
+    latest commit.
+  </p>
+
+  <form method="post" action="/profiles/{{ .Profile.ID }}/foreign-imports" id="foreign-imports-form" data-profile-id="{{ .Profile.ID }}">
+    <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+
+    <div id="foreign-flakes">
+      {{ range $i, $f := .ForeignImports }}
+      <div class="foreign-flake section-subcard" data-index="{{ $i }}">
+        <div class="form-group">
+          <label>Flake reference</label>
+          <input type="text" name="flake_ref_{{ $i }}" class="form-item flake-ref" value="{{ $f.FlakeRef }}" placeholder="github:owner/repo" />
+          <small class="muted-text">Supported: <code>github:owner/repo</code>, <code>gitlab:owner/repo</code>, <code>git+https://host/path</code></small>
+        </div>
+        <div class="form-group">
+          <label>Access token (private flakes)</label>
+          <input type="password" name="flake_token_{{ $i }}" class="form-item flake-token" autocomplete="off" placeholder="{{ if $f.HasToken }}•••••• stored — leave blank to keep{{ else }}optional{{ end }}" />
+          {{ if $f.HasToken }}<small class="muted-text">A token is stored for <code>{{ $f.Host }}</code>. Leave blank to keep it.</small>{{ end }}
+        </div>
+        <input type="hidden" name="flake_rev_{{ $i }}" class="flake-rev" value="{{ $f.Rev }}" />
+        <div class="form-actions">
+          <button type="button" class="btn flake-load">{{ if $f.Rev }}Update{{ else }}Load modules{{ end }}</button>
+          <button type="button" class="btn btn-danger flake-remove">Remove flake</button>
+        </div>
+        <div class="flake-status muted-text" role="status"></div>
+        {{ if $f.Rev }}<div class="flake-pinned muted-text">Pinned commit: <code class="flake-pinned-rev">{{ $f.Rev }}</code></div>{{ else }}<div class="flake-pinned muted-text" hidden>Pinned commit: <code class="flake-pinned-rev"></code></div>{{ end }}
+        <fieldset class="flake-modules">
+          <legend>Importable modules</legend>
+          <div class="flake-modules-list">
+            {{ range $m := $f.Modules }}
+            <label class="checkbox-row"><input type="checkbox" name="flake_modules_{{ $i }}" value="{{ $m }}" checked /> <code>{{ $m }}</code></label>
+            {{ end }}
+          </div>
+          <small class="muted-text flake-modules-hint">Click "Load modules" to fetch the flake's importable modules.</small>
+        </fieldset>
+      </div>
+      {{ end }}
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn" id="add-foreign-flake"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add flake</button>
+    </div>
+
+    <p class="muted-text">Foreign import changes create a new profile revision.</p>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Save Foreign Imports</button>
+      <a href="/profiles/{{ .Profile.ID }}" class="btn">Back to Summary</a>
+    </div>
+  </form>
+</section>
+
+<template id="foreign-flake-template">
+  <div class="foreign-flake section-subcard" data-index="__INDEX__">
+    <div class="form-group">
+      <label>Flake reference</label>
+      <input type="text" name="flake_ref___INDEX__" class="form-item flake-ref" placeholder="github:owner/repo" />
+      <small class="muted-text">Supported: <code>github:owner/repo</code>, <code>gitlab:owner/repo</code>, <code>git+https://host/path</code></small>
+    </div>
+    <div class="form-group">
+      <label>Access token (private flakes)</label>
+      <input type="password" name="flake_token___INDEX__" class="form-item flake-token" autocomplete="off" placeholder="optional" />
+    </div>
+    <input type="hidden" name="flake_rev___INDEX__" class="flake-rev" value="" />
+    <div class="form-actions">
+      <button type="button" class="btn flake-load">Load modules</button>
+      <button type="button" class="btn btn-danger flake-remove">Remove flake</button>
+    </div>
+    <div class="flake-status muted-text" role="status"></div>
+    <div class="flake-pinned muted-text" hidden>Pinned commit: <code class="flake-pinned-rev"></code></div>
+    <fieldset class="flake-modules">
+      <legend>Importable modules</legend>
+      <div class="flake-modules-list"></div>
+      <small class="muted-text flake-modules-hint">Click "Load modules" to fetch the flake's importable modules.</small>
+    </fieldset>
+  </div>
+</template>
+
+<script src="/foreign_imports.js" defer></script>
+
+{{ template "foot" . }}

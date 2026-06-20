@@ -400,7 +400,7 @@ func TestWriteBuildOverridesModuleSetsKernelPackages(t *testing.T) {
 
 	err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", []string{"vim"}, ProfileKernelConfig{
 		Attr: "linux_6_19",
-	}, ProfileSecurityConfig{}, false, "")
+	}, ProfileSecurityConfig{}, false, "", nil)
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestWriteBuildOverridesModuleUsesDefaultFleetiInstanceURL(t *testing.T) {
 		t.Fatalf("failed to create modules directory: %v", err)
 	}
 
-	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, "", nil); err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
 
@@ -459,7 +459,7 @@ func TestWriteBuildOverridesModuleUsesConfiguredFleetiInstanceURLPrefix(t *testi
 		t.Fatalf("failed to create modules directory: %v", err)
 	}
 
-	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, "", nil); err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
 
@@ -488,7 +488,7 @@ func TestWriteBuildOverridesModuleAllowsHTTPFleetiInstanceURL(t *testing.T) {
 		t.Fatalf("failed to create modules directory: %v", err)
 	}
 
-	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, ""); err != nil {
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, "", nil); err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
 
@@ -524,7 +524,7 @@ func TestWriteBuildOverridesModuleAddsKernelSourceOverlay(t *testing.T) {
 			Ref:     "refs/tags/v6.19-custom",
 			Rev:     "abcd1234abcd1234abcd1234abcd1234abcd1234",
 		},
-	}, ProfileSecurityConfig{}, false, "")
+	}, ProfileSecurityConfig{}, false, "", nil)
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestWriteBuildOverridesModuleWritesKernelPatchesInOrder(t *testing.T) {
 				},
 			},
 		},
-	}, ProfileSecurityConfig{}, true, "")
+	}, ProfileSecurityConfig{}, true, "", nil)
 	if err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
@@ -647,7 +647,7 @@ func TestWriteBuildOverridesModuleImportsProfileRawNixModule(t *testing.T) {
 	}
 
 	rawNix := `{ config, ... }: { services.openssh.settings.PasswordAuthentication = false; }`
-	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", []string{"vim"}, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, rawNix); err != nil {
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", []string{"vim"}, ProfileKernelConfig{}, ProfileSecurityConfig{}, false, rawNix, nil); err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
 
@@ -710,7 +710,7 @@ func TestWriteBuildOverridesModuleConfiguresSecurityHardening(t *testing.T) {
 		},
 	}
 
-	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, securityConfig, false, ""); err != nil {
+	if err := writeBuildOverridesModule(root, "1.2.3", "fleet-a", nil, ProfileKernelConfig{}, securityConfig, false, "", nil); err != nil {
 		t.Fatalf("writeBuildOverridesModule returned error: %v", err)
 	}
 
