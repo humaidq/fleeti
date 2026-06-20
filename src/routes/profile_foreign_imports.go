@@ -341,13 +341,23 @@ func pinnedForeignFlakeRef(ref, rev string) (string, error) {
 	switch {
 	case strings.HasPrefix(ref, "github:"), strings.HasPrefix(ref, "gitlab:"):
 		scheme := ref[:strings.IndexByte(ref, ':')+1]
-		path := strings.Trim(ref[len(scheme):], "/")
-		segments := strings.Split(path, "/")
+		rest := ref[len(scheme):]
+
+		// Split off any query string (e.g. ?dir=nixos for subdirectory flakes)
+		// before segmenting so the pinned revision is inserted as the owner/repo
+		// commit segment, not appended after the query.
+		query := ""
+		if i := strings.IndexByte(rest, '?'); i >= 0 {
+			query = rest[i:]
+			rest = rest[:i]
+		}
+
+		segments := strings.Split(strings.Trim(rest, "/"), "/")
 		if len(segments) < 2 {
 			return "", fmt.Errorf("invalid external flake reference %q", ref)
 		}
 
-		return fmt.Sprintf("%s%s/%s/%s", scheme, segments[0], segments[1], rev), nil
+		return fmt.Sprintf("%s%s/%s/%s%s", scheme, segments[0], segments[1], rev, query), nil
 	case strings.HasPrefix(ref, "git+https://"):
 		separator := "?"
 		if strings.Contains(ref, "?") {
