@@ -9,6 +9,7 @@
   <a href="/profiles/{{ .Profile.ID }}/kernel" class="prof-tab{{ if eq .ProfileNavActive "kernel" }} prof-tab-active{{ end }}"><i class="fa-solid fa-microchip" aria-hidden="true"></i>Kernel</a>
   <a href="/profiles/{{ .Profile.ID }}/openclaw" class="prof-tab{{ if eq .ProfileNavActive "openclaw" }} prof-tab-active{{ end }}"><i class="fa-solid fa-cubes" aria-hidden="true"></i>MoltHouse</a>
   <a href="/profiles/{{ .Profile.ID }}/raw-nix" class="prof-tab{{ if eq .ProfileNavActive "raw_nix" }} prof-tab-active{{ end }}"><i class="fa-solid fa-code" aria-hidden="true"></i>Raw Nix</a>
+  <a href="/profiles/{{ .Profile.ID }}/foreign-imports" class="prof-tab{{ if eq .ProfileNavActive "foreign_imports" }} prof-tab-active{{ end }}"><i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i>Foreign Imports</a>
   <a href="/profiles/{{ .Profile.ID }}/edit" class="prof-tab{{ if eq .ProfileNavActive "settings" }} prof-tab-active{{ end }}"><i class="fa-solid fa-sliders" aria-hidden="true"></i>Settings</a>
   {{ end }}
 </nav>

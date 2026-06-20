@@ -97,6 +97,7 @@ type ProfileEdit struct {
 	ConfigSchemaVersion int
 	ConfigJSON          string
 	RawNix              string
+	ForeignImports      []ForeignImport
 	CreatedAt           string
 }
 
@@ -213,6 +214,7 @@ type CreateProfileInput struct {
 	Description         string
 	ConfigJSON          string
 	RawNix              string
+	ForeignImports      []ForeignImport
 	ConfigSchemaVersion int
 }
 
@@ -844,13 +846,16 @@ func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, erro
 
 	item.FleetName = strings.Join(assignedFleetNames, ", ")
 
+	var foreignImportsJSON string
+
 	err = p.QueryRow(ctx, `
 		SELECT
 			revision,
 			config_hash,
 			config_schema_version,
 			config_json::text,
-			raw_nix
+			raw_nix,
+			foreign_imports::text
 		FROM profile_revisions
 		WHERE profile_id::text = $1
 		ORDER BY revision DESC
@@ -861,6 +866,7 @@ func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, erro
 		&item.ConfigSchemaVersion,
 		&item.ConfigJSON,
 		&item.RawNix,
+		&foreignImportsJSON,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ProfileEdit{}, ErrProfileHasNoRevisions
@@ -869,6 +875,12 @@ func GetProfileForEdit(ctx context.Context, profileID string) (ProfileEdit, erro
 	if err != nil {
 		return ProfileEdit{}, fmt.Errorf("failed to load latest profile revision: %w", err)
 	}
+
+	foreignImports, err := decodeForeignImports(foreignImportsJSON)
+	if err != nil {
+		return ProfileEdit{}, err
+	}
+	item.ForeignImports = foreignImports
 
 	return item, nil
 }
@@ -913,7 +925,19 @@ func CreateProfile(ctx context.Context, input CreateProfileInput, ownerUserID st
 		return err
 	}
 
-	configHash := calculateProfileConfigHash(input.ConfigSchemaVersion, canonicalConfigJSON, input.RawNix)
+	foreignImports := NormalizeForeignImports(input.ForeignImports)
+	if err := ValidateForeignImports(foreignImports); err != nil {
+		return err
+	}
+
+	canonicalForeignImports, err := canonicalizeForeignImports(foreignImports)
+	if err != nil {
+		return err
+	}
+
+	foreignImportsEnabled := len(foreignImports) > 0
+
+	configHash := calculateProfileConfigHash(input.ConfigSchemaVersion, canonicalConfigJSON, input.RawNix, canonicalForeignImports)
 
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -958,8 +982,8 @@ func CreateProfile(ctx context.Context, input CreateProfileInput, ownerUserID st
 			foreign_imports,
 			config_hash
 		)
-		VALUES ($1, 1, $2, $3::jsonb, $4, FALSE, '[]'::jsonb, $5)
-	`, profileID, input.ConfigSchemaVersion, canonicalConfigJSON, input.RawNix, configHash)
+		VALUES ($1, 1, $2, $3::jsonb, $4, $5, $6::jsonb, $7)
+	`, profileID, input.ConfigSchemaVersion, canonicalConfigJSON, input.RawNix, foreignImportsEnabled, canonicalForeignImports, configHash)
 	if err != nil {
 		return fmt.Errorf("failed to create initial profile revision: %w", err)
 	}
@@ -1001,6 +1025,18 @@ func UpdateProfile(ctx context.Context, profileID string, input CreateProfileInp
 	if err != nil {
 		return false, err
 	}
+
+	foreignImports := NormalizeForeignImports(input.ForeignImports)
+	if err := ValidateForeignImports(foreignImports); err != nil {
+		return false, err
+	}
+
+	canonicalForeignImports, err := canonicalizeForeignImports(foreignImports)
+	if err != nil {
+		return false, err
+	}
+
+	foreignImportsEnabled := len(foreignImports) > 0
 
 	tx, err := p.Begin(ctx)
 	if err != nil {
@@ -1075,7 +1111,7 @@ func UpdateProfile(ctx context.Context, profileID string, input CreateProfileInp
 		return false, ErrInvalidConfigSchemaVersion
 	}
 
-	configHash := calculateProfileConfigHash(configSchemaVersion, canonicalConfigJSON, input.RawNix)
+	configHash := calculateProfileConfigHash(configSchemaVersion, canonicalConfigJSON, input.RawNix, canonicalForeignImports)
 	createdNewRevision := configHash != latestConfigHash
 
 	if createdNewRevision {
@@ -1090,8 +1126,8 @@ func UpdateProfile(ctx context.Context, profileID string, input CreateProfileInp
 				foreign_imports,
 				config_hash
 			)
-			VALUES ($1::uuid, $2, $3, $4::jsonb, $5, FALSE, '[]'::jsonb, $6)
-		`, profileID, latestRevision+1, configSchemaVersion, canonicalConfigJSON, input.RawNix, configHash)
+			VALUES ($1::uuid, $2, $3, $4::jsonb, $5, $6, $7::jsonb, $8)
+		`, profileID, latestRevision+1, configSchemaVersion, canonicalConfigJSON, input.RawNix, foreignImportsEnabled, canonicalForeignImports, configHash)
 		if err != nil {
 			return false, fmt.Errorf("failed to create profile revision: %w", err)
 		}
@@ -1273,8 +1309,12 @@ func normalizeProfileConfigJSON(raw string) (string, error) {
 	return string(canonical), nil
 }
 
-func calculateProfileConfigHash(configSchemaVersion int, canonicalConfigJSON, rawNix string) string {
-	material := fmt.Sprintf("%d\n%s\n%s\n%s", configSchemaVersion, canonicalConfigJSON, strings.TrimSpace(rawNix), "[]")
+func calculateProfileConfigHash(configSchemaVersion int, canonicalConfigJSON, rawNix, canonicalForeignImports string) string {
+	if strings.TrimSpace(canonicalForeignImports) == "" {
+		canonicalForeignImports = "[]"
+	}
+
+	material := fmt.Sprintf("%d\n%s\n%s\n%s", configSchemaVersion, canonicalConfigJSON, strings.TrimSpace(rawNix), canonicalForeignImports)
 	sum := sha256.Sum256([]byte(material))
 
 	return hex.EncodeToString(sum[:])
@@ -1505,45 +1545,60 @@ func DeleteBuild(ctx context.Context, buildID string) error {
 	return nil
 }
 
-func GetBuildExecutionMetadata(ctx context.Context, buildID string) (string, string, string, string, error) {
+// BuildExecutionMetadata carries the profile-revision configuration needed to
+// materialize the Nix workspace for a build.
+type BuildExecutionMetadata struct {
+	ConfigJSON     string
+	RawNix         string
+	FleetID        string
+	ProfileID      string
+	ForeignImports []ForeignImport
+}
+
+func GetBuildExecutionMetadata(ctx context.Context, buildID string) (BuildExecutionMetadata, error) {
 	p := GetPool()
 	if p == nil {
-		return "", "", "", "", ErrDatabaseConnectionNotInitialized
+		return BuildExecutionMetadata{}, ErrDatabaseConnectionNotInitialized
 	}
 
 	buildID = strings.TrimSpace(buildID)
 	if buildID == "" {
-		return "", "", "", "", ErrBuildRequired
+		return BuildExecutionMetadata{}, ErrBuildRequired
 	}
 
-	var configJSON string
-	var fleetID string
-	var rawNix string
-	var profileID string
+	var meta BuildExecutionMetadata
+	var foreignImportsJSON string
 
 	err := p.QueryRow(ctx, `
 		SELECT
 			pr.config_json::text,
 			COALESCE(pr.raw_nix, ''),
 			COALESCE(b.fleet_id::text, ''),
-			pr.profile_id::text
+			pr.profile_id::text,
+			pr.foreign_imports::text
 		FROM builds b
 		JOIN profile_revisions pr ON pr.id = b.profile_revision_id
 		WHERE b.id::text = $1
-	`, buildID).Scan(&configJSON, &rawNix, &fleetID, &profileID)
+	`, buildID).Scan(&meta.ConfigJSON, &meta.RawNix, &meta.FleetID, &meta.ProfileID, &foreignImportsJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", "", "", ErrBuildNotFound
+		return BuildExecutionMetadata{}, ErrBuildNotFound
 	}
 
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to load build profile execution metadata: %w", err)
+		return BuildExecutionMetadata{}, fmt.Errorf("failed to load build profile execution metadata: %w", err)
 	}
 
-	if fleetID == "" {
-		return "", "", "", "", ErrProfileFleetRequired
+	if meta.FleetID == "" {
+		return BuildExecutionMetadata{}, ErrProfileFleetRequired
 	}
 
-	return configJSON, rawNix, fleetID, profileID, nil
+	foreignImports, err := decodeForeignImports(foreignImportsJSON)
+	if err != nil {
+		return BuildExecutionMetadata{}, err
+	}
+	meta.ForeignImports = foreignImports
+
+	return meta, nil
 }
 
 func CreateBuild(ctx context.Context, input CreateBuildInput) (string, error) {

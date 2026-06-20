@@ -91,7 +91,10 @@ func evaluateProfileDraftAgainstPinnedNix(ctx context.Context, draft profileWiza
 		fleetID = strings.TrimSpace(draft.FleetIDs[0])
 	}
 
-	if err := writeBuildOverridesModule(workspaceNixOSDir, profileNixValidationVersion, fleetID, packages, kernelConfig, securityConfig, openclawEnabled, draft.RawNix); err != nil {
+	// Foreign imports are intentionally omitted from draft validation: they are
+	// fetched from remote (possibly private) flakes and are validated at build
+	// time. The generated module is a no-op stub here.
+	if err := writeBuildOverridesModule(workspaceNixOSDir, profileNixValidationVersion, fleetID, packages, kernelConfig, securityConfig, openclawEnabled, draft.RawNix, nil); err != nil {
 		return profileNixEvaluationResult{Valid: false, Errors: []string{err.Error()}}
 	}
 

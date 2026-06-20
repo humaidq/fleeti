@@ -578,11 +578,12 @@ func AddProfilePackage(c flamego.Context, s session.Session) {
 	}
 
 	input := db.CreateProfileInput{
-		FleetIDs:    profile.FleetIDs,
-		Name:        profile.Name,
-		Description: profile.Description,
-		ConfigJSON:  configJSON,
-		RawNix:      profile.RawNix,
+		FleetIDs:       profile.FleetIDs,
+		Name:           profile.Name,
+		Description:    profile.Description,
+		ConfigJSON:     configJSON,
+		RawNix:         profile.RawNix,
+		ForeignImports: profile.ForeignImports,
 	}
 
 	if _, err := db.UpdateProfile(c.Request().Context(), profileID, input); err != nil {
@@ -689,11 +690,12 @@ func RemoveProfilePackage(c flamego.Context, s session.Session) {
 	}
 
 	input := db.CreateProfileInput{
-		FleetIDs:    profile.FleetIDs,
-		Name:        profile.Name,
-		Description: profile.Description,
-		ConfigJSON:  configJSON,
-		RawNix:      profile.RawNix,
+		FleetIDs:       profile.FleetIDs,
+		Name:           profile.Name,
+		Description:    profile.Description,
+		ConfigJSON:     configJSON,
+		RawNix:         profile.RawNix,
+		ForeignImports: profile.ForeignImports,
 	}
 
 	if _, err := db.UpdateProfile(c.Request().Context(), profileID, input); err != nil {
@@ -1507,6 +1509,7 @@ func UpdateProfile(c flamego.Context, s session.Session) {
 		Description:         strings.TrimSpace(c.Request().Form.Get("description")),
 		ConfigJSON:          profile.ConfigJSON,
 		RawNix:              profile.RawNix,
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
@@ -1731,6 +1734,7 @@ func UpdateProfileKernel(c flamego.Context, s session.Session) {
 		Description:         profile.Description,
 		ConfigJSON:          configJSON,
 		RawNix:              profile.RawNix,
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
@@ -1807,6 +1811,7 @@ func UpdateProfileRawNix(c flamego.Context, s session.Session) {
 		Description:         profile.Description,
 		ConfigJSON:          profile.ConfigJSON,
 		RawNix:              strings.TrimSpace(c.Request().Form.Get("raw_nix")),
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
@@ -1909,6 +1914,7 @@ func UpdateProfileSecurity(c flamego.Context, s session.Session) {
 		Description:         profile.Description,
 		ConfigJSON:          configJSON,
 		RawNix:              profile.RawNix,
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
@@ -1993,6 +1999,7 @@ func UpdateProfileOpenClaw(c flamego.Context, s session.Session) {
 		Description:         profile.Description,
 		ConfigJSON:          configJSON,
 		RawNix:              profile.RawNix,
+		ForeignImports:      profile.ForeignImports,
 		ConfigSchemaVersion: profile.ConfigSchemaVersion,
 	}
 
@@ -3407,6 +3414,10 @@ func profileRawNixPath(profileID string) string {
 	return "/profiles/" + profileID + "/raw-nix"
 }
 
+func profileForeignImportsPath(profileID string) string {
+	return "/profiles/" + profileID + "/foreign-imports"
+}
+
 func profileOpenclawPath(profileID string) string {
 	return "/profiles/" + profileID + "/openclaw"
 }
@@ -3681,6 +3692,7 @@ func deleteFleetCascade(ctx context.Context, fleetID string) error {
 			Description:         profileEdit.Description,
 			ConfigJSON:          profileEdit.ConfigJSON,
 			RawNix:              profileEdit.RawNix,
+			ForeignImports:      profileEdit.ForeignImports,
 			ConfigSchemaVersion: profileEdit.ConfigSchemaVersion,
 		})
 		if err != nil {
