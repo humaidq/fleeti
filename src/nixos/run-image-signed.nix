@@ -14,6 +14,7 @@
   openssl,
   qemu,
   sbsigntool,
+  swtpm,
   util-linux,
   writeShellApplication,
   xz,
@@ -33,6 +34,7 @@ writeShellApplication {
     openssl
     qemu
     sbsigntool
+    swtpm
     util-linux
     xz
   ];
@@ -84,8 +86,23 @@ writeShellApplication {
     cp "${OVMF.fd}/FV/OVMF_VARS.fd" "$vars"
     chmod u+w "$vars"
 
-    echo "==> Booting signed image in QEMU (OVMF, Secure Boot capable)"
-    exec qemu-system-x86_64 \
+    # Software TPM so the remote-attestation flow (fleeti-tpm quote -> server
+    # verification) can be exercised. A fresh emulated TPM is created on first
+    # start; its state persists for the life of this VM under $work.
+    echo "==> Starting software TPM (swtpm)"
+    tpmstate="$work/tpm"
+    mkdir -p "$tpmstate"
+    swtpm socket \
+      --tpmstate dir="$tpmstate" \
+      --ctrl type=unixio,path="$tpmstate/swtpm-sock" \
+      --tpm2 \
+      --flags startup-clear \
+      &
+    swtpm_pid=$!
+    trap 'kill "$swtpm_pid" 2>/dev/null || true; rm -rf "$work"' EXIT
+
+    echo "==> Booting signed image in QEMU (OVMF, Secure Boot capable, TPM 2.0)"
+    qemu-system-x86_64 \
       -smp 4 \
       -m 2048 \
       --enable-kvm \
@@ -95,6 +112,9 @@ writeShellApplication {
       -drive if=pflash,format=raw,unit=0,readonly=on,file="${OVMF.fd}/FV/OVMF_CODE.fd" \
       -drive if=pflash,format=raw,unit=1,file="$vars" \
       -drive file="$disk",format=raw,if=virtio \
+      -chardev socket,id=chrtpm,path="$tpmstate/swtpm-sock" \
+      -tpmdev emulator,id=tpm0,chardev=chrtpm \
+      -device tpm-tis,tpmdev=tpm0 \
       -serial mon:stdio \
       -display gtk
   '';

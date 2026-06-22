@@ -67,6 +67,22 @@ type agentTelemetryRequest struct {
 	AvailableVersion string `json:"available_version"`
 	SecureBoot       bool   `json:"secure_boot"`
 	SetupMode        bool   `json:"setup_mode"`
+	// Attestation is an optional TPM quote proving the device's boot state.
+	Attestation *tpmAttestation `json:"attestation,omitempty"`
+}
+
+type agentTelemetryResponse struct {
+	OK bool `json:"ok"`
+	// AttestNonce is the challenge the device must include in its next quote.
+	AttestNonce string `json:"attest_nonce,omitempty"`
+}
+
+type agentAttestRegisterRequest struct {
+	AKPublic string `json:"ak_public"`
+}
+
+type agentAttestRegisterResponse struct {
+	AttestNonce string `json:"attest_nonce"`
 }
 
 type agentCommand struct {
@@ -204,7 +220,48 @@ func AgentTelemetry(c flamego.Context, device *db.Device) {
 		return
 	}
 
-	writeJSON(c, map[string]bool{"ok": true})
+	// Verify the optional attestation quote and hand back the next challenge
+	// nonce. Telemetry recording must not fail if attestation plumbing errors, so
+	// log and continue without a nonce.
+	nonce, err := handleTelemetryAttestation(c.Request().Context(), device, req.SecureBoot, req.ReportedVersion, req.Attestation)
+	if err != nil {
+		logger.Error("failed to process device attestation", "device_id", device.ID, "error", err)
+	}
+
+	writeJSON(c, agentTelemetryResponse{OK: true, AttestNonce: nonce})
+}
+
+// AgentAttestRegister stores a device's TPM attestation key (trust-on-first-use)
+// and returns the first challenge nonce. Authenticated by device token.
+func AgentAttestRegister(c flamego.Context, device *db.Device) {
+	var req agentAttestRegisterRequest
+	if err := decodeAgentRequest(c.Request(), &req); err != nil {
+		writeAgentRequestError(c, err)
+
+		return
+	}
+
+	if strings.TrimSpace(req.AKPublic) == "" {
+		writeJSONError(c, http.StatusBadRequest, "ak_public is required")
+
+		return
+	}
+
+	nonce, err := registerDeviceAttestationKey(c.Request().Context(), device.ID, req.AKPublic)
+	if err != nil {
+		if errors.Is(err, errAttestationKeyInvalid) {
+			writeJSONError(c, http.StatusBadRequest, "Invalid attestation key")
+
+			return
+		}
+
+		logger.Error("failed to register attestation key", "device_id", device.ID, "error", err)
+		writeJSONError(c, http.StatusInternalServerError, "Failed to register attestation key")
+
+		return
+	}
+
+	writeJSON(c, agentAttestRegisterResponse{AttestNonce: nonce})
 }
 
 // AgentCommands returns the commands awaiting execution by a device.

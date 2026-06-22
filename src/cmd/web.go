@@ -193,6 +193,7 @@ func start(ctx context.Context, cmd *cli.Command) error {
 	// Device-token authenticated agent endpoints.
 	f.Group("/api/v1/device", func() {
 		f.Post("/telemetry", routes.AgentTelemetry)
+		f.Post("/attest/register", routes.AgentAttestRegister)
 		f.Get("/commands", routes.AgentCommands)
 		f.Post("/commands/{id}/result", routes.AgentCommandResult)
 	}, routes.RequireDeviceAuth())
@@ -291,6 +292,8 @@ func start(ctx context.Context, cmd *cli.Command) error {
 		f.Post("/devices/{id}/edit", csrf.Validate, routes.UpdateDevice)
 		f.Post("/devices/{id}/force-update", csrf.Validate, routes.DeviceForceUpdate)
 		f.Post("/devices/{id}/reboot", csrf.Validate, routes.DeviceReboot)
+		f.Post("/devices/{id}/trust-attestation", csrf.Validate, routes.TrustDeviceAttestation)
+		f.Post("/devices/{id}/reset-attestation", csrf.Validate, routes.ResetDeviceAttestation)
 		f.Post("/devices/{id}/delete", csrf.Validate, routes.DeleteDevice)
 	}, routes.RequireAuth)
 

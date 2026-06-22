@@ -9,6 +9,7 @@
 let
   cfg = config.fleeti.services.admind;
   agentPackage = pkgs.callPackage ../packages/fleeti-admind.nix { };
+  tpmHelperPackage = pkgs.callPackage ../packages/fleeti-tpm.nix { };
   stateDir = "/var/lib/fleeti/admind";
   runtimeDir = "/run/fleeti/admind";
 in
@@ -42,6 +43,10 @@ in
   config = lib.mkIf cfg.enable {
     environment.systemPackages = [ agentPackage ];
 
+    # Remote attestation reads the TPM through the in-kernel resource manager
+    # (/dev/tpmrm0). Devices without a TPM simply skip attestation.
+    security.tpm2.enable = lib.mkDefault true;
+
     systemd.services.fleeti-admind = {
       description = "Fleeti device management agent";
       wantedBy = [ "multi-user.target" ];
@@ -56,6 +61,7 @@ in
         FLEETI_ADMIND_TELEMETRY_INTERVAL = toString cfg.telemetryIntervalSeconds;
         FLEETI_SYSTEMD_SYSUPDATE = "${pkgs.systemd}/lib/systemd/systemd-sysupdate";
         FLEETI_SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
+        FLEETI_TPM_HELPER = "${tpmHelperPackage}/bin/fleeti-tpm";
       };
 
       serviceConfig = {

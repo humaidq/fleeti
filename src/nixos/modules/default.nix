@@ -11,9 +11,11 @@
 
 let
   fleetiSbEnrollPackage = pkgs.callPackage ../packages/fleeti-sb-enroll.nix { };
+  fleetiAdmindPackage = pkgs.callPackage ../packages/fleeti-admind.nix { };
   fleetiAdminPackage = pkgs.callPackage ../packages/fleeti-admin.nix {
     sudoPath = "${config.security.wrapperDir}/sudo";
     sbEnrollPath = "${fleetiSbEnrollPackage}/bin/fleeti-sb-enroll";
+    admindPath = "${fleetiAdmindPackage}/bin/fleeti-admind";
   };
 in
 {
@@ -241,6 +243,11 @@ in
           }
           {
             command = "${fleetiSbEnrollPackage}/bin/fleeti-sb-enroll";
+            options = [ "NOPASSWD" ];
+          }
+          {
+            # Lets the Admin GUI hand a local update to the daemon (the single updater).
+            command = "${fleetiAdmindPackage}/bin/fleeti-admind request-update";
             options = [ "NOPASSWD" ];
           }
         ];

@@ -3043,6 +3043,66 @@ func DeviceReboot(c flamego.Context, s session.Session) {
 	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Reboot queued. The device will reboot shortly.")
 }
 
+// TrustDeviceAttestation is the explicit first-trust step: it promotes the
+// device's most recent verified quote to the golden baseline and marks the device
+// trusted and attested. Performed by an administrator after confirming the device
+// is genuine (e.g. during controlled provisioning).
+func TrustDeviceAttestation(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
+
+		return
+	}
+
+	if _, err := resolveSessionUser(c.Request().Context(), s); err != nil {
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
+
+		return
+	}
+
+	reason, err := trustDeviceFromPendingQuote(c.Request().Context(), deviceID)
+	if err != nil {
+		handleMutationError(c, s, "/devices/"+deviceID, err)
+
+		return
+	}
+
+	if reason != "" {
+		redirectWithMessage(c, s, "/devices/"+deviceID, FlashError, reason)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Device trusted and attested.")
+}
+
+// ResetDeviceAttestation clears a device's registered attestation key and golden
+// PCR state so it re-establishes trust (re-provision) on its next check-in. Used
+// when a device is re-imaged or re-provisioned in the controlled environment.
+func ResetDeviceAttestation(c flamego.Context, s session.Session) {
+	deviceID := strings.TrimSpace(c.Param("id"))
+	if deviceID == "" {
+		redirectWithMessage(c, s, "/devices", FlashError, "Device not found")
+
+		return
+	}
+
+	if _, err := resolveSessionUser(c.Request().Context(), s); err != nil {
+		redirectWithMessage(c, s, "/devices", FlashError, "Access restricted")
+
+		return
+	}
+
+	if err := db.ResetDeviceAttestation(c.Request().Context(), deviceID); err != nil {
+		handleMutationError(c, s, "/devices/"+deviceID, err)
+
+		return
+	}
+
+	redirectWithMessage(c, s, "/devices/"+deviceID, FlashSuccess, "Attestation reset. The device will re-register its attestation key on its next check-in.")
+}
+
 // DeleteDevice removes a device from the fleet. Its token is dropped along with
 // the row, so the laptop's next check-in is rejected and the agent unpairs itself.
 func DeleteDevice(c flamego.Context, s session.Session) {

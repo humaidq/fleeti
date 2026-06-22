@@ -48,6 +48,21 @@ def log(message):
     sys.stderr.flush()
 
 
+# Progress is reported on stdout as newline-delimited JSON, each line prefixed with
+# PROGRESS_PREFIX, so the parent (fleeti-admind) can stream and surface it while the
+# update runs. Human-readable logs stay on stderr (see log()). The overall fraction is
+# phase-weighted (see run_update / reconstruct_*); it advances at milestone boundaries
+# rather than tracking byte-level progress of desync/zstd.
+PROGRESS_PREFIX = "@@PROGRESS@@ "
+
+
+def emit_progress(state, phase, fraction):
+    fraction = max(0.0, min(1.0, float(fraction)))
+    line = PROGRESS_PREFIX + json.dumps({"state": state, "phase": phase, "fraction": fraction})
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
+
+
 class UpdateError(Exception):
     pass
 
@@ -204,6 +219,9 @@ class Updater:
         seed_index = os.path.join(self.staging_dir, "seed-nix-store.caibx")
         staged = os.path.join(self.staging_dir, "%s_%s.nix-store.raw.zst" % (self.image_id, target))
 
+        # The nix-store image is the bulk of the work; it spans the 0.02..0.75 band of
+        # the overall progress bar.
+        emit_progress("downloading", "Reconstructing system image", 0.05)
         self.download("%s/%s_%s.nix-store.raw.caibx" % (self.base_url, self.image_id, target), target_index)
 
         active = self.active_partition(current)
@@ -211,8 +229,11 @@ class Updater:
         log("seeding from active partition %s; reconstructing into %s" % (active, inactive))
 
         self.make_seed_index(active, seed_index)
+        emit_progress("downloading", "Downloading changed chunks", 0.12)
         self.extract(target_index, inactive, seed_index, active)
+        emit_progress("downloading", "Reconstructing system image", 0.62)
         self.compress(inactive, staged)
+        emit_progress("downloading", "Reconstructing system image", 0.75)
         return os.path.basename(staged)
 
     def reconstruct_uki(self, current, target):
@@ -221,6 +242,8 @@ class Updater:
         reconstructed = os.path.join(self.staging_dir, "%s_%s.efi" % (self.uki_name, target))
         staged = os.path.join(self.staging_dir, "%s_%s.efi.zst" % (self.uki_name, target))
 
+        # The UKI is small; it spans the 0.75..0.90 band of the overall progress bar.
+        emit_progress("downloading", "Reconstructing boot image", 0.77)
         self.download("%s/%s_%s.efi.caibx" % (self.base_url, self.uki_name, target), target_index)
 
         seed_blob = os.path.join(self.boot_dir, "EFI", "Linux", "%s_%s.efi" % (self.uki_name, current))
@@ -229,8 +252,10 @@ class Updater:
 
         self.make_seed_index(seed_blob, seed_index)
         self.extract(target_index, reconstructed, seed_index, seed_blob)
+        emit_progress("downloading", "Reconstructing boot image", 0.87)
         self.compress(reconstructed, staged)
         os.remove(reconstructed)
+        emit_progress("downloading", "Reconstructing boot image", 0.90)
         return os.path.basename(staged)
 
     def stage_manifest(self, names):
@@ -269,6 +294,7 @@ class Updater:
             raise UpdateError("delta update is not configured (missing base/store URL)")
 
         current = self.current_version()
+        emit_progress("downloading", "Preparing", 0.0)
         target = (requested_target or "").strip() or self.discover_target_version()
         if not target:
             log("no target version available; nothing to do")
@@ -279,13 +305,16 @@ class Updater:
 
         log("delta update %s -> %s" % (current, target))
         self.clean_staging()
+        emit_progress("downloading", "Preparing", 0.02)
 
         nix_store_artifact = self.reconstruct_nix_store(current, target)
         uki_artifact = self.reconstruct_uki(current, target)
         self.stage_manifest([nix_store_artifact, uki_artifact])
+        emit_progress("applying", "Applying update", 0.92)
 
         log("staged artifacts; applying via systemd-sysupdate")
         self.apply(target)
+        emit_progress("applying", "Applying update", 1.0)
         log("delta update to %s applied" % target)
         return 0
 

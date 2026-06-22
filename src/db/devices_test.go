@@ -19,7 +19,9 @@ func TestDeviceAttestationTier(t *testing.T) {
 		{"no secure boot", false, false, "none"},
 		{"secure boot only", true, false, "secure-boot"},
 		{"secure boot and attested", true, true, "attested"},
-		{"attested without secure boot stays none", false, true, "none"},
+		// Secure Boot is optional: a passing TPM attestation alone reaches the
+		// top tier, since PCR 11 (the software measurement) is verified either way.
+		{"attested without secure boot", false, true, "attested"},
 	}
 
 	for _, tc := range cases {

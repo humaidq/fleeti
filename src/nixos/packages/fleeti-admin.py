@@ -19,6 +19,7 @@ SYSTEMD_SYSUPDATE = os.environ.get("FLEETI_SYSTEMD_SYSUPDATE", "systemd-sysupdat
 SYSTEMCTL = os.environ.get("FLEETI_SYSTEMCTL", "systemctl")
 SUDO = os.environ.get("FLEETI_SUDO", "sudo")
 SB_ENROLL = os.environ.get("FLEETI_SB_ENROLL", "fleeti-sb-enroll")
+ADMIND = os.environ.get("FLEETI_ADMIND", "fleeti-admind")
 OS_RELEASE_PATH = "/etc/os-release"
 AGENT_STATUS_PATH = os.environ.get("FLEETI_ADMIND_STATUS", "/run/fleeti/admind/status.json")
 
@@ -104,18 +105,35 @@ def read_efivar_flag(name):
     return data[4] != 0
 
 
+def read_pk_enrolled():
+    # The Platform Key lives under the global GUID. A populated PK (firmware in
+    # user mode) carries an EFI signature list after the 4 attribute bytes; in
+    # setup mode the variable is absent or empty. PK presence is what lets us
+    # tell "enrolled, pending reboot" (sb=0, setup_mode=0) apart from a system
+    # that genuinely has no keys and must be put into setup mode from firmware.
+    path = os.path.join(EFIVARS_DIR, "PK-%s" % EFI_GLOBAL_GUID)
+    try:
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return False
+
+    return len(data) > 4
+
+
 def read_secure_boot_state():
     if not os.path.isdir(EFIVARS_DIR):
-        return {"supported": False, "secure_boot": False, "setup_mode": False}
+        return {"supported": False, "secure_boot": False, "setup_mode": False, "keys_enrolled": False}
 
     secure_boot = read_efivar_flag("SecureBoot")
     if secure_boot is None:
-        return {"supported": False, "secure_boot": False, "setup_mode": False}
+        return {"supported": False, "secure_boot": False, "setup_mode": False, "keys_enrolled": False}
 
     return {
         "supported": True,
         "secure_boot": bool(secure_boot),
         "setup_mode": bool(read_efivar_flag("SetupMode")),
+        "keys_enrolled": read_pk_enrolled(),
     }
 
 
@@ -235,7 +253,19 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         # Updater page initial state.
         self.set_busy(None)
         self.show_idle()
-        self.check_pending_update(is_startup=True)
+
+        # The daemon (fleeti-admind) is the single updater. The Updater page polls its
+        # status.json and reflects any in-progress update. shown_update_state tracks the
+        # last daemon state we rendered so terminal states (reboot-required/failed) are
+        # applied once instead of clobbering the manual flow on every tick.
+        self.shown_update_state = "idle"
+        self.daemon_update_active = False
+        self.refresh_updater()
+        # Only run the local startup check when the daemon isn't already updating (or
+        # waiting on a reboot / showing a failure).
+        if self.shown_update_state == "idle":
+            self.check_pending_update(is_startup=True)
+        GLib.timeout_add_seconds(1, self.refresh_updater)
 
         # Provision page polls the agent status file.
         self.refresh_provision()
@@ -272,6 +302,13 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.status_label.set_wrap(True)
         self.status_label.set_xalign(0)
         root.append(self.status_label)
+
+        # Progress bar for an update the daemon is performing (forced from the server or
+        # requested locally). Driven by status.json via refresh_updater().
+        self.progress_bar = Gtk.ProgressBar()
+        self.progress_bar.set_show_text(True)
+        self.progress_bar.set_visible(False)
+        root.append(self.progress_bar)
 
         self.details_expander = Gtk.Expander(label="Update details")
         self.details_expander.set_expanded(False)
@@ -493,6 +530,21 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
             self.sb_action = "enroll"
             return
 
+        # Not active and not in setup mode. If our Platform Key is enrolled, keys
+        # are in place and the system just needs a normal reboot to activate
+        # Secure Boot. Only when no keys are present does the user need to enter
+        # firmware to put the machine into setup mode.
+        if state["keys_enrolled"]:
+            self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Enrolled</span>")
+            self.sb_detail_label.set_text(
+                "Secure Boot keys are enrolled. Restart to activate Secure Boot."
+            )
+            self.sb_button.set_label("Restart now")
+            self.sb_button.set_sensitive(True)
+            self.sb_button.set_visible(True)
+            self.sb_action = "reboot"
+            return
+
         self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Not enrolled</span>")
         self.sb_detail_label.set_text(
             "Restart into UEFI setup so Fleeti can enroll its Secure Boot keys."
@@ -513,6 +565,11 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
             self.sb_button.set_sensitive(False)
             self.sb_detail_label.set_text("Restarting into UEFI setup...")
             self.run_async([SYSTEMCTL, "reboot", "--firmware-setup"], self.on_sb_reboot_finished)
+        elif self.sb_action == "reboot":
+            self.sb_busy = True
+            self.sb_button.set_sensitive(False)
+            self.sb_detail_label.set_text("Restarting to activate Secure Boot...")
+            self.run_async([SYSTEMCTL, "reboot"], self.on_sb_activate_reboot_finished)
 
     def on_sb_enroll_finished(self, result):
         self.sb_busy = False
@@ -522,8 +579,22 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
             self.sb_detail_label.set_text("Failed to enroll Secure Boot keys: " + message)
             return False
 
-        self.sb_button.set_visible(False)
+        self.sb_status_label.set_markup("Secure Boot: <span weight='bold'>Enrolled</span>")
         self.sb_detail_label.set_text("Secure Boot keys enrolled. Restart to activate Secure Boot.")
+        self.sb_button.set_label("Restart now")
+        self.sb_button.set_visible(True)
+        self.sb_action = "reboot"
+        return False
+
+    def on_sb_activate_reboot_finished(self, result):
+        self.sb_busy = False
+        self.sb_button.set_sensitive(True)
+        if result.returncode != 0:
+            message = format_privileged_error(result.stderr.strip(), "Could not restart the system.")
+            self.sb_detail_label.set_text("Failed to restart: " + message)
+            return False
+
+        self.sb_detail_label.set_text("Restarting to activate Secure Boot...")
         return False
 
     def on_sb_reboot_finished(self, result):
@@ -593,11 +664,15 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.changelog_label.set_text("")
         self.changelog_label.set_visible(False)
 
+    def hide_progress(self):
+        self.progress_bar.set_visible(False)
+
     def show_idle(self):
         self.available_version = None
         self.hide_release()
         self.hide_details()
         self.hide_actions()
+        self.hide_progress()
         self.check_button.set_visible(True)
         self.set_status(None)
         self.set_busy(None)
@@ -607,6 +682,7 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.hide_release()
         self.hide_details()
         self.hide_actions()
+        self.hide_progress()
         self.reboot_button.set_visible(True)
         self.set_status(message)
         self.set_busy(None)
@@ -621,6 +697,7 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.available_version = version
         self.hide_details()
         self.hide_actions()
+        self.hide_progress()
         self.install_button.set_visible(True)
         if self.pending_update:
             self.reboot_button.set_visible(True)
@@ -648,9 +725,75 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         self.hide_release()
         self.hide_details()
         self.hide_actions()
+        self.hide_progress()
         self.check_button.set_visible(True)
         self.set_status(message)
         self.set_busy(None)
+
+    def show_updating(self, phase, fraction, target):
+        # The daemon is performing an update; reflect its live phase and progress.
+        self.available_version = None
+        self.hide_release()
+        self.hide_details()
+        self.hide_actions()
+        self.set_busy(None)
+
+        label = phase or "Updating"
+        if target:
+            label = f"{label} (version {target})"
+        self.set_status(label)
+
+        fraction = max(0.0, min(1.0, fraction))
+        self.progress_bar.set_fraction(fraction)
+        self.progress_bar.set_text(f"{int(round(fraction * 100))}%")
+        self.progress_bar.set_visible(True)
+
+    def refresh_updater(self):
+        # Poll the daemon's status file and reflect any update it is performing. The
+        # daemon is the single source of update status; this view takes precedence over
+        # the manual check/install flow whenever an update is in progress.
+        status = read_agent_status()
+        state = (status or {}).get("update_state", "idle")
+
+        if state in ("downloading", "applying"):
+            self.daemon_update_active = True
+            self.shown_update_state = state
+            fraction = (status.get("update_progress", 0) or 0) / 100.0
+            self.show_updating(
+                status.get("update_phase", "Updating"),
+                fraction,
+                status.get("update_target_version", ""),
+            )
+        elif state == "rebooting":
+            self.daemon_update_active = True
+            if self.shown_update_state != "rebooting":
+                self.hide_actions()
+                self.hide_release()
+                self.hide_details()
+                self.hide_progress()
+                self.set_status("")
+                self.set_busy("Rebooting into the updated release...")
+            self.shown_update_state = "rebooting"
+        elif state == "reboot-required":
+            self.daemon_update_active = False
+            if self.shown_update_state != "reboot-required":
+                self.show_reboot_required(
+                    "The Fleeti update finished installing. Reboot to start the new release."
+                )
+            self.shown_update_state = "reboot-required"
+        elif state == "failed":
+            self.daemon_update_active = False
+            if self.shown_update_state != "failed":
+                error = (status or {}).get("update_error") or "unknown error"
+                self.show_error(f"Failed to install the update: {error}")
+            self.shown_update_state = "failed"
+        else:
+            # Daemon is idle: leave the manual flow alone, just reset our tracker so a
+            # later daemon update renders fresh.
+            self.daemon_update_active = False
+            self.shown_update_state = "idle"
+
+        return True
 
     def run_async(self, args, completion):
         def worker():
@@ -673,6 +816,10 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         )
 
     def on_pending_checked(self, is_startup, result):
+        # The daemon may have started an update while this check was in flight; if so,
+        # let refresh_updater() own the view.
+        if self.daemon_update_active:
+            return False
         stderr = result.stderr.strip()
         if result.returncode == 0:
             self.pending_update = True
@@ -710,6 +857,8 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         )
 
     def on_check_finished(self, is_startup, result):
+        if self.daemon_update_active:
+            return False
         stderr = result.stderr.strip()
         payload = parse_check_new_response(result.stdout)
 
@@ -762,6 +911,8 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         )
 
     def on_release_details_loaded(self, version, result):
+        if self.daemon_update_active:
+            return False
         stderr = result.stderr.strip()
         if result.returncode != 0:
             if stderr:
@@ -792,38 +943,27 @@ class FleetiAdminWindow(Gtk.ApplicationWindow):
         return False
 
     def on_install_clicked(self, _button):
+        # Hand the install to the daemon (the single updater): it performs a delta
+        # update and publishes progress, which refresh_updater() reflects. We don't pass
+        # a target version; the daemon installs the latest available release.
         self.hide_actions()
         self.hide_details()
-        version = self.available_version
-        if version:
-            self.set_busy(f"Installing release {version}...")
-        else:
-            self.set_busy("Installing the latest available release...")
-
+        self.hide_release()
         self.set_status("")
-        command = [SYSTEMD_SYSUPDATE, "--no-pager", "update"]
-        if version:
-            command.append(version)
-        self.run_async(
-            command,
-            self.on_install_finished,
-        )
+        self.set_busy("Starting update...")
+        self.run_async([ADMIND, "request-update"], self.on_install_requested)
 
-    def on_install_finished(self, result):
-        stderr = result.stderr.strip()
-        details = self.format_command_details(result)
+    def on_install_requested(self, result):
         if result.returncode != 0:
-            message = format_privileged_error(stderr, "The update command failed.")
-            self.show_error(f"Failed to install the update: {message}")
-            if details:
-                self.show_details("Update details", details)
+            message = format_privileged_error(result.stderr.strip(), "Could not start the update.")
+            self.show_error(f"Failed to start the update: {message}")
             return False
 
-        self.show_reboot_required(
-            "The Fleeti update finished installing. Reboot to start the new release."
-        )
-        if details:
-            self.show_details("Update details", details)
+        # The daemon will pick up the request and start updating; show a placeholder
+        # until its first progress arrives via status.json.
+        self.daemon_update_active = True
+        self.shown_update_state = "downloading"
+        self.show_updating("Starting update", 0.0, "")
         return False
 
     def on_reboot_clicked(self, _button):

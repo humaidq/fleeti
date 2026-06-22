@@ -178,13 +178,15 @@ type Device struct {
 	CreatedAt             string
 }
 
-// AttestationTier derives the device's attestation level from its Secure Boot
-// and attestation state. The "attested" (green) tier additionally requires a
-// passing TPM challenge, which is future work; until then `Attested` is never
-// set and the tier tops out at "secure-boot".
+// AttestationTier derives the device's attestation level. "attested" (green) means
+// the device passed TPM remote attestation: a signed quote whose golden PCR 11
+// (the UKI/software measurement) matched, plus PCR 7 when Secure Boot is enabled.
+// Secure Boot is optional, so attestation alone is sufficient for the top tier;
+// "secure-boot" is the intermediate tier for a device with Secure Boot on that has
+// not (yet) passed attestation.
 func (d Device) AttestationTier() string {
 	switch {
-	case d.SecureBootEnabled && d.Attested:
+	case d.Attested:
 		return "attested"
 	case d.SecureBootEnabled:
 		return "secure-boot"

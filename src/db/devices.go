@@ -39,7 +39,13 @@ type DeviceDetail struct {
 	AvailableVersion string
 	AgentVersion     string
 	LastTelemetryAt  string
+	LastAttestedAt   string
 	Paired           bool
+	// AttestTrusted is true once an admin has explicitly trusted the device.
+	AttestTrusted bool
+	// AttestPending is true when the device has reported a verified quote that is
+	// awaiting an admin "Trust & Attest" decision.
+	AttestPending bool
 }
 
 // DeviceTelemetryRecord is one stored telemetry sample.
@@ -137,7 +143,10 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 			d.available_version,
 			d.agent_version,
 			COALESCE(to_char(d.last_telemetry_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
-			EXISTS(SELECT 1 FROM device_tokens t WHERE t.device_id = d.id)
+			COALESCE(to_char(d.last_attested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ''),
+			EXISTS(SELECT 1 FROM device_tokens t WHERE t.device_id = d.id),
+			d.attest_trusted,
+			d.pending_pcr11 IS NOT NULL
 		FROM devices d
 		JOIN fleets f ON f.id = d.fleet_id
 		LEFT JOIN releases curr ON curr.id = d.current_release_id
@@ -162,7 +171,10 @@ func GetDeviceByID(ctx context.Context, id string) (*DeviceDetail, error) {
 		&item.AvailableVersion,
 		&item.AgentVersion,
 		&item.LastTelemetryAt,
+		&item.LastAttestedAt,
 		&item.Paired,
+		&item.AttestTrusted,
+		&item.AttestPending,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDeviceNotFound

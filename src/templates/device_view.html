@@ -48,6 +48,15 @@
           <td>
             {{ if eq .Device.AttestationTier "attested" }}
             <span class="device-attest device-attest-ok"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> attested</span>
+            {{ else if .Device.AttestPending }}
+            <span class="device-attest device-attest-warn"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> awaiting trust</span>
+            <form method="post" action="/devices/{{ .Device.ID }}/trust-attestation" class="inline-form"
+              onsubmit="return confirm('Trust this device and record its current boot state as the attestation baseline? Only do this for a device you know is genuine.');">
+              <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+              <button type="submit" class="btn">Trust &amp; Attest</button>
+            </form>
+            {{ else if .Device.AttestTrusted }}
+            <span class="device-attest device-attest-none"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> trusted &mdash; verification failing</span>
             {{ else if eq .Device.AttestationTier "secure-boot" }}
             <span class="device-attest device-attest-warn"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i> secure boot</span>
             {{ else }}
@@ -115,6 +124,10 @@
           <td data-label="Last Telemetry (UTC)">Last telemetry (UTC)</td>
           <td>{{ if .Device.LastTelemetryAt }}{{ .Device.LastTelemetryAt }}{{ else }}<span class="muted-text">never</span>{{ end }}</td>
         </tr>
+        <tr>
+          <td data-label="Last Attested (UTC)">Last attested (UTC)</td>
+          <td>{{ if .Device.LastAttestedAt }}{{ .Device.LastAttestedAt }}{{ else }}<span class="muted-text">never</span>{{ end }}</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -157,6 +170,11 @@
       onsubmit="return confirm('Reboot this device now?');">
       <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
       <button type="submit" class="btn">Reboot</button>
+    </form>
+    <form method="post" action="/devices/{{ .Device.ID }}/reset-attestation" class="inline-form"
+      onsubmit="return confirm('Reset this device\'s attestation? It will re-register its TPM key on next check-in.');">
+      <input type="hidden" name="_csrf" value="{{ .csrf_token }}" />
+      <button type="submit" class="btn">Reset Attestation</button>
     </form>
   </div>
 </section>

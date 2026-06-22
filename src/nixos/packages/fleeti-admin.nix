@@ -12,6 +12,7 @@
   python3Packages,
   sudoPath ? "sudo",
   sbEnrollPath ? "fleeti-sb-enroll",
+  admindPath ? "fleeti-admind",
   symlinkJoin,
   systemd,
   wrapGAppsHook4,
@@ -66,6 +67,7 @@ let
         "--set" "FLEETI_SYSTEMD_SYSUPDATE" "${systemd}/lib/systemd/systemd-sysupdate"
         "--set" "FLEETI_SYSTEMCTL" "${systemd}/bin/systemctl"
         "--set" "FLEETI_SB_ENROLL" "${sbEnrollPath}"
+        "--set" "FLEETI_ADMIND" "${admindPath}"
         "--set" "FLEETI_ADMIND_STATUS" "/run/fleeti/admind/status.json"
       )
     '';

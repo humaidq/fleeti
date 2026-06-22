@@ -44,6 +44,8 @@ var (
 	ErrDeviceSerialAlreadyExists   = errors.New("device serial number already exists")
 	ErrDeviceNotFound              = errors.New("device not found")
 	ErrDeviceTokenNotFound         = errors.New("device token not found")
+	ErrAttestationKeyNotFound      = errors.New("device attestation key not found")
+	ErrAttestationBaselineNotFound = errors.New("attestation baseline not found")
 	ErrDeviceCommandNotFound       = errors.New("device command not found")
 	ErrDeviceCommandPending        = errors.New("a command is already queued for this device")
 	ErrEnrollmentNotFound          = errors.New("pairing code not found")
