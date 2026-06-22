@@ -47,6 +47,25 @@ in
     # (/dev/tpmrm0). Devices without a TPM simply skip attestation.
     security.tpm2.enable = lib.mkDefault true;
 
+    # Once a TPM is present the UKI is measured, which flips systemd's
+    # ConditionSecurity=measured-uki true and activates its measured-boot/TPM2 setup
+    # units (SRK generation + PCR-phase extension) in early boot. On this appliance they
+    # run Before=sysinit.target/basic.target and stall there, freezing the boot at the
+    # plymouth splash. Fleeti attestation uses its own attestation key (fleeti-tpm) and
+    # quotes PCRs directly, so none of these are needed; mask the whole family.
+    systemd.suppressedSystemUnits = [
+      "systemd-tpm2-setup-early.service"
+      "systemd-tpm2-setup.service"
+      "systemd-pcrphase-sysinit.service"
+      "systemd-pcrphase.service"
+      "systemd-pcrmachine.service"
+      "systemd-pcrnvdone.service"
+      "systemd-pcrproduct.service"
+    ];
+    boot.initrd.systemd.suppressedUnits = [
+      "systemd-pcrphase-initrd.service"
+    ];
+
     systemd.services.fleeti-admind = {
       description = "Fleeti device management agent";
       wantedBy = [ "multi-user.target" ];
