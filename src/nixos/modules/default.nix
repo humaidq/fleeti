@@ -31,6 +31,9 @@ in
     ./fleeti-update.nix
     ./update.nix
     ./update-package.nix
+    # TEMPORARY: boot diagnostics (plymouth off + verbose console). Remove once the
+    # boot freeze is diagnosed. See modules/_debug-boot.nix.
+    ./_debug-boot.nix
   ];
 
   boot.loader.grub.enable = false;
